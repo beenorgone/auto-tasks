@@ -626,6 +626,22 @@ process_po_document() {
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "po-document" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "filename-po"
 }
 
+process_mo_document() {
+  source_path=$1
+  file_mtime=$2
+  file_size=$3
+  sha=$4
+  dest_dir="${CURRENT_MONTH_ROOT}/documents/lệnh sản xuất (MO)"
+  ensure_dir "$dest_dir"
+  target="${dest_dir}/$(basename "$source_path")"
+  if [ -e "$target" ]; then
+    target="${dest_dir}/${sha}_$(basename "$source_path")"
+  fi
+  run_cmd mv "$source_path" "$target"
+  info "Processed MO document -> $target"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "mo-document" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "filename-mo"
+}
+
 process_unc_pdf() {
   source_path=$1
   invoice_year=$2
@@ -836,6 +852,11 @@ process_source_file() {
 
   if printf '%s' "$(basename "$source_path")" | grep -Eq '[Pp][Oo][[:space:]_-]*[0-9]+'; then
     process_po_document "$source_path" "$file_mtime" "$file_size" "$sha"
+    return 0
+  fi
+
+  if printf '%s' "$(basename "$source_path")" | grep -Eq '[Mm][Oo][[:space:]_-]*[0-9]+'; then
+    process_mo_document "$source_path" "$file_mtime" "$file_size" "$sha"
     return 0
   fi
 

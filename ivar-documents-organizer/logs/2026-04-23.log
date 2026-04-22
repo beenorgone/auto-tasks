@@ -36,3 +36,44 @@
 2026-04-23 00:12:27 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/NOP Finding.pdf
 2026-04-23 00:12:27 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/Sample IVAR Viet Nam.pdf
 2026-04-23 00:14:44 [INFO] OCR fallback used for PDF: /home/beenorgone/Documents/2026/BAN TU CONG BO SAN PHAM - BOT SUA DUA ORGANIC VEGAN 02-OCMP1.ACP.2024 FINAL.pdf
+2026-04-23 00:25:42 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:25:42 [INFO] Date: 2026-04-23
+2026-04-23 00:25:42 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:25:42 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:25:42 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:25:42 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:25:42 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/0109867256_107975180130-A11.pdf (/home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/03/Unknown Vendor 0109867256/0109867256_107975180130-A11.pdf	invoice)
+2026-04-23 00:25:42 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:25:42 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/PO 20_IVAR 17.04.pdf (2026-04-23 00:11:22 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/PO 20_IVAR 17.04 (2).pdf (/home/beenorgone/Documents/2026/04/documents/file don nhap hang (PO)/PO 20_IVAR 17.04 (1).pdf	po-document)
+/home/beenorgone/Documents/2026/04/duplicates/PO 20_IVAR 17.04 (2).pdf	duplicate)
+2026-04-23 00:25:42 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:25:42 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/sample mushrooms.docx
+2026-04-23 00:25:42 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:25:42 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-5.jpg
+2026-04-23 00:25:51 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - Application CUC 20260421.pdf
+2026-04-23 00:25:51 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/signed - Application CUC 20260421.pdf
+2026-04-23 00:25:51 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-6.jpg
+2026-04-23 00:25:51 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-4.jpg
+2026-04-23 00:25:51 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-2.jpg
+2026-04-23 00:25:51 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/DNTT.jpg
+2026-04-23 00:25:58 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - contract CUC IVAR.pdf
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/signed - contract CUC IVAR.pdf
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-8.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-3.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260414_172103.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260415_140113.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-1.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-7.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-7.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-6.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/265687888451041.png
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260415_141323.jpg
+2026-04-23 00:25:58 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/CLAUDE.md
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-3.jpg
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-xuat-kho-nguyen-lieu-2.jpg
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/zalo_84742707662827.jpg
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-1.jpg
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260401_175139.jpg
+2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-8.jpg
+2026-04-23 00:25:59 [INFO] Sync completed.
+2026-04-23 00:25:59 [WARN] rup-prj failed.

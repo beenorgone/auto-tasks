@@ -77,3 +77,41 @@
 2026-04-23 00:25:59 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/mo7006-anh-may-moc-8.jpg
 2026-04-23 00:25:59 [INFO] Sync completed.
 2026-04-23 00:25:59 [WARN] rup-prj failed.
+2026-04-23 00:29:56 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:29:56 [INFO] Date: 2026-04-23
+2026-04-23 00:29:56 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:29:56 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:29:56 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:29:56 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:29:56 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:29:56 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:29:56 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/sample mushrooms.docx
+2026-04-23 00:29:56 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:29:56 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-5.jpg
+2026-04-23 00:30:05 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - Application CUC 20260421.pdf
+2026-04-23 00:30:05 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/signed - Application CUC 20260421.pdf
+2026-04-23 00:30:05 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-6.jpg
+2026-04-23 00:30:05 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-4.jpg
+2026-04-23 00:30:05 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-2.jpg
+2026-04-23 00:30:06 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/DNTT.jpg
+2026-04-23 00:30:12 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - contract CUC IVAR.pdf
+2026-04-23 00:30:12 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/signed - contract CUC IVAR.pdf
+2026-04-23 00:30:12 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-8.jpg
+2026-04-23 00:30:12 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-3.jpg
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260414_172103.jpg
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260415_140113.jpg
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-1.jpg
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-7.jpg
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-7.jpg
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-6.jpg
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/265687888451041.png
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260415_141323.jpg
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/CLAUDE.md
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-3.jpg
+2026-04-23 00:30:13 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-xuat-kho-nguyen-lieu-2.jpg
+2026-04-23 00:30:13 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/zalo_84742707662827.jpg
+2026-04-23 00:30:14 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-1.jpg
+2026-04-23 00:30:14 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Downloads/20260401_175139.jpg
+2026-04-23 00:30:14 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-8.jpg
+2026-04-23 00:30:14 [INFO] Sync completed.
+2026-04-23 00:30:14 [WARN] rup-prj failed.

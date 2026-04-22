@@ -693,6 +693,22 @@ process_general_bucket() {
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "bucketed" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$bucket"
 }
 
+process_year_inbox() {
+  source_path=$1
+  file_mtime=$2
+  file_size=$3
+  sha=$4
+  dest_dir="${CURRENT_YEAR_ROOT}"
+  ensure_dir "$dest_dir"
+  target="${dest_dir}/$(basename "$source_path")"
+  if [ -e "$target" ]; then
+    target="${dest_dir}/${sha}_$(basename "$source_path")"
+  fi
+  run_cmd mv "$source_path" "$target"
+  info "Moved unclassified root file -> $target"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "year-inbox" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "year-root"
+}
+
 process_invoice_pdf() {
   source_path=$1
   invoice_year=$2
@@ -857,6 +873,12 @@ process_source_file() {
 
   if printf '%s' "$(basename "$source_path")" | grep -Eq '[Mm][Oo][[:space:]_-]*[0-9]+'; then
     process_mo_document "$source_path" "$file_mtime" "$file_size" "$sha"
+    return 0
+  fi
+
+  source_dir=$(dirname "$source_path")
+  if [ "$source_dir" = "$DOCS_ROOT" ] || [ "$source_dir" = "$DOWNLOADS_ROOT" ]; then
+    process_year_inbox "$source_path" "$file_mtime" "$file_size" "$sha"
     return 0
   fi
 

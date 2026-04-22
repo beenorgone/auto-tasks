@@ -918,7 +918,7 @@ scan_current_month() {
 
 run_rup_prj() {
   if [ "$DRY_RUN" -eq 1 ]; then
-    info "DRY-RUN (cd ${HOME_DIR} && rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: --drive-import-formats xlsx,docx,pptx,odt,ods,odp --drive-skip-gdocs --verbose --drive-auth-owner-only=true --filter-from=.rclone-filters-gprj)"
+    info "DRY-RUN (cd ${HOME_DIR} && rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: --drive-import-formats xlsx,docx,pptx,odt,ods,odp --drive-skip-gdocs --drive-auth-owner-only=true --filter-from=.rclone-filters-gprj --skip-links --stats=30s --stats-one-line --log-level ERROR)"
     return 0
   fi
 
@@ -937,9 +937,12 @@ run_rup_prj() {
     rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: \
       --drive-import-formats xlsx,docx,pptx,odt,ods,odp \
       --drive-skip-gdocs \
-      --verbose \
       --drive-auth-owner-only=true \
-      --filter-from='.rclone-filters-gprj'
+      --filter-from='.rclone-filters-gprj' \
+      --skip-links \
+      --stats=30s \
+      --stats-one-line \
+      --log-level ERROR
   ); then
     info "Completed rclone project sync."
   else

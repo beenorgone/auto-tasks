@@ -191,3 +191,15 @@
 2026-04-23 00:59:12 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
 2026-04-23 00:59:12 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
 2026-04-23 00:59:12 [INFO] Sync completed.
+2026-04-23 01:09:03 [INFO] Completed rup-prj.
+2026-04-23 01:12:12 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 01:12:12 [INFO] Date: 2026-04-23
+2026-04-23 01:12:12 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 01:12:12 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 01:12:12 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 01:12:12 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 01:12:12 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 01:12:12 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 01:12:12 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 01:12:12 [INFO] Sync completed.
+2026-04-23 01:28:54 [INFO] Completed rclone project sync.

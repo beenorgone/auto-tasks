@@ -940,7 +940,7 @@ run_rup_prj() {
       --verbose \
       --drive-auth-owner-only=true \
       --filter-from='.rclone-filters-gprj'
-  ) >/dev/null 2>&1; then
+  ); then
     info "Completed rclone project sync."
   else
     warn "rclone project sync failed."

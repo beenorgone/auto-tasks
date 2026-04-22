@@ -171,3 +171,13 @@
 2026-04-23 00:52:11 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
 2026-04-23 00:52:11 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
 2026-04-23 00:52:11 [INFO] Sync completed.
+2026-04-23 00:57:22 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:57:22 [INFO] Date: 2026-04-23
+2026-04-23 00:57:22 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:57:22 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:57:22 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:57:22 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:57:22 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:57:22 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:57:22 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:57:22 [INFO] Sync completed.

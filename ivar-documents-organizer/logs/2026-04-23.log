@@ -115,3 +115,59 @@
 2026-04-23 00:30:14 [INFO] Processed MO document -> /home/beenorgone/Documents/2026/04/documents/lệnh sản xuất (MO)/mo7006-anh-may-moc-8.jpg
 2026-04-23 00:30:14 [INFO] Sync completed.
 2026-04-23 00:30:14 [WARN] rup-prj failed.
+2026-04-23 00:32:17 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:32:17 [INFO] Date: 2026-04-23
+2026-04-23 00:32:17 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:32:17 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:32:17 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:32:17 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:32:17 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:32:17 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:32:17 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/sample mushrooms.docx
+2026-04-23 00:32:17 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:32:26 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - Application CUC 20260421.pdf
+2026-04-23 00:32:26 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/signed - Application CUC 20260421.pdf
+2026-04-23 00:32:26 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/DNTT.jpg
+2026-04-23 00:32:33 [INFO] OCR fallback used for PDF: /home/beenorgone/Downloads/signed - contract CUC IVAR.pdf
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/signed - contract CUC IVAR.pdf
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/20260414_172103.jpg
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/20260415_140113.jpg
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/265687888451041.png
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/20260415_141323.jpg
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/CLAUDE.md
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/zalo_84742707662827.jpg
+2026-04-23 00:32:33 [INFO] Moved unclassified root file -> /home/beenorgone/Documents/2026/20260401_175139.jpg
+2026-04-23 00:32:33 [INFO] Sync completed.
+2026-04-23 00:32:33 [WARN] rup-prj failed.
+2026-04-23 00:51:57 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:51:57 [INFO] Date: 2026-04-23
+2026-04-23 00:51:57 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:51:57 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:51:57 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:51:57 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/signed - Application CUC 20260421.pdf (/home/beenorgone/Documents/2026/signed - Application CUC 20260421.pdf	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/DNTT.jpg (/home/beenorgone/Documents/2026/DNTT.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/signed - contract CUC IVAR.pdf (/home/beenorgone/Documents/2026/signed - contract CUC IVAR.pdf	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/20260414_172103.jpg (/home/beenorgone/Documents/2026/20260414_172103.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/20260415_140113.jpg (/home/beenorgone/Documents/2026/20260415_140113.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/sample mushrooms.docx (/home/beenorgone/Documents/2026/sample mushrooms.docx	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/265687888451041.png (/home/beenorgone/Documents/2026/265687888451041.png	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/20260415_141323.jpg (/home/beenorgone/Documents/2026/20260415_141323.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/CLAUDE.md (/home/beenorgone/Documents/2026/CLAUDE.md	year-inbox)
+2026-04-23 00:51:57 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/zalo_84742707662827.jpg (/home/beenorgone/Documents/2026/zalo_84742707662827.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/20260401_175139.jpg (/home/beenorgone/Documents/2026/20260401_175139.jpg	year-inbox)
+2026-04-23 00:51:57 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:51:57 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:51:57 [INFO] Sync completed.
+2026-04-23 00:51:57 [WARN] rup-prj failed.
+2026-04-23 00:52:11 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:52:11 [INFO] Date: 2026-04-23
+2026-04-23 00:52:11 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:52:11 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:52:11 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:52:11 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:52:11 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 00:52:11 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 00:52:11 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 00:52:11 [INFO] Sync completed.

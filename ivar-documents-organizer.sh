@@ -918,14 +918,32 @@ scan_current_month() {
 
 run_rup_prj() {
   if [ "$DRY_RUN" -eq 1 ]; then
-    info "DRY-RUN bash -ic 'rup-prj'"
+    info "DRY-RUN (cd ${HOME_DIR} && rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: --drive-import-formats xlsx,docx,pptx,odt,ods,odp --drive-skip-gdocs --verbose --drive-auth-owner-only=true --filter-from=.rclone-filters-gprj)"
     return 0
   fi
 
-  if bash -ic 'rup-prj' >/dev/null 2>&1; then
-    info "Completed rup-prj."
+  if [ ! -f "${HOME_DIR}/.rclone-filters-gprj" ]; then
+    warn "rclone filter file not found: ${HOME_DIR}/.rclone-filters-gprj"
+    return 0
+  fi
+
+  if ! command -v rclone >/dev/null 2>&1; then
+    warn "rclone command not found."
+    return 0
+  fi
+
+  if (
+    cd "$HOME_DIR" &&
+    rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: \
+      --drive-import-formats xlsx,docx,pptx,odt,ods,odp \
+      --drive-skip-gdocs \
+      --verbose \
+      --drive-auth-owner-only=true \
+      --filter-from='.rclone-filters-gprj'
+  ) >/dev/null 2>&1; then
+    info "Completed rclone project sync."
   else
-    warn "rup-prj failed."
+    warn "rclone project sync failed."
   fi
 }
 

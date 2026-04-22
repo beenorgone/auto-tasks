@@ -1,0 +1,37 @@
+2026-04-22 23:31:04 [INFO] === IVAR Accounting File Sync ===
+2026-04-22 23:31:04 [INFO] Date: 2026-04-22
+2026-04-22 23:31:04 [INFO] Source month root: /home/beenorgone/Documents/2026/04
+2026-04-22 23:31:04 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-22 23:31:04 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-22 23:31:04 [INFO] Scanning current month folder: /home/beenorgone/Documents/2026/04
+2026-04-22 23:31:04 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Excel/v2_Organic System Plan and Field History and Specification VN.xlsm
+2026-04-22 23:31:04 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Excel/BK Q1.26.xlsx
+2026-04-22 23:31:04 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Docs/hóa đơn điện t6 dũng.doc
+2026-04-22 23:31:04 [INFO] Processed PO document -> /home/beenorgone/Documents/2026/04/documents/file don nhap hang (PO)/PO 20_IVAR (2).pdf
+2026-04-22 23:31:04 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/DRAFT PRJ 883118 - 2031735_1.pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/v2_Organic System Plan and Field History and Specification VN.pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/FINAL PRJ 883118 - 2031735 O-FA0022026VI.pdf
+2026-04-22 23:31:05 [WARN] Skipping OCR fallback for PDF without tesseract/pdftoppm: /home/beenorgone/Documents/2026/04/PDF/HỒ SƠ IVAR (1).pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/HỒ SƠ IVAR (1).pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/POSOCK5HPWSSG.pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/04 05 Dt BYT trinh Q_70e33f3d-bd19-4442-a213-5fd54817354f_1.pdf
+2026-04-22 23:31:05 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Images/Generated Image April 06, 2026 - 12_35AM.jpg
+2026-04-22 23:31:05 [INFO] Sync completed.
+2026-04-22 23:58:14 [INFO] === IVAR Accounting File Sync ===
+2026-04-22 23:58:14 [INFO] Date: 2026-04-22
+2026-04-22 23:58:14 [INFO] Source month root: /home/beenorgone/Documents/2026/04
+2026-04-22 23:58:14 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-22 23:58:14 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-22 23:58:14 [INFO] Scanning current month folder: /home/beenorgone/Documents/2026/04
+2026-04-22 23:58:15 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Excel/v2_Organic System Plan and Field History and Specification VN.xlsm
+2026-04-22 23:58:15 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Excel/BK Q1.26.xlsx
+2026-04-22 23:58:15 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Docs/hóa đơn điện t6 dũng.doc
+2026-04-22 23:58:15 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/DRAFT PRJ 883118 - 2031735_1.pdf
+2026-04-22 23:58:16 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/v2_Organic System Plan and Field History and Specification VN.pdf
+2026-04-22 23:58:17 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/FINAL PRJ 883118 - 2031735 O-FA0022026VI.pdf
+2026-04-22 23:58:23 [INFO] OCR fallback used for PDF: /home/beenorgone/Documents/2026/04/PDF/HỒ SƠ IVAR (1).pdf
+2026-04-22 23:58:23 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/HỒ SƠ IVAR (1).pdf
+2026-04-22 23:58:23 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/POSOCK5HPWSSG.pdf
+2026-04-22 23:58:23 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/PDF/04 05 Dt BYT trinh Q_70e33f3d-bd19-4442-a213-5fd54817354f_1.pdf
+2026-04-22 23:58:24 [INFO] No accounting rule matched; left in place: /home/beenorgone/Documents/2026/04/Images/Generated Image April 06, 2026 - 12_35AM.jpg
+2026-04-22 23:58:24 [INFO] Sync completed.

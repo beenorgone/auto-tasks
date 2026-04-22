@@ -1,0 +1,38 @@
+2026-04-23 00:11:17 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 00:11:17 [INFO] Date: 2026-04-23
+2026-04-23 00:11:17 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 00:11:17 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 00:11:17 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 00:11:17 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 00:11:18 [INFO] OCR fallback used for PDF: /home/beenorgone/Documents/2026/ma vach yeast hero avocado Matcha UPC 8936226670210.pdf
+2026-04-23 00:11:18 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/ma vach yeast hero avocado Matcha UPC 8936226670210.pdf
+2026-04-23 00:11:19 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/QT.MCN.OZO Quy trình vận hành máy Ozone.pdf
+2026-04-23 00:11:19 [INFO] Processed invoice -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/03/Unknown Vendor 0109867256/0109867256_107975180130-A11.pdf
+2026-04-23 00:11:19 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/HD_IVAR Vietnam_170426 (1).doc
+2026-04-23 00:11:20 [INFO] Processed PO document -> /home/beenorgone/Documents/2026/04/documents/file don nhap hang (PO)/PO 20_IVAR 17.04 (1).pdf
+2026-04-23 00:11:20 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/TSKT gửi tung.doc
+2026-04-23 00:11:20 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/082.-MSDS-Sodium-hydroxide.pdf
+2026-04-23 00:11:21 [INFO] Processed invoice -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/04/Unknown Vendor 1300975859/1300975859_04-SS-HT.pdf
+2026-04-23 00:11:21 [INFO] Processed invoice -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/03/Unknown Vendor/AGRI_DRAFT CONTRACT_IVAR_03.2026.pdf
+2026-04-23 00:11:22 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/1. AF_OSP_PS.zip
+2026-04-23 00:11:22 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/PO 20_IVAR 17.04 (2).pdf (/home/beenorgone/Documents/2026/04/documents/file don nhap hang (PO)/PO 20_IVAR 17.04 (1).pdf	po-document)
+2026-04-23 00:11:22 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/mpdf.pdf
+2026-04-23 00:11:23 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/draft TC (2).pdf
+2026-04-23 00:11:24 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/TCB 426 Label Box bản TV Yeast Hero Protein Powder Avocado Matcha.pdf
+2026-04-23 00:11:24 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/743-2026-00073028.pdf
+2026-04-23 00:12:23 [INFO] OCR fallback used for PDF: /home/beenorgone/Documents/2026/THONG BAO DIA CHI - ACP.pdf
+2026-04-23 00:12:23 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/THONG BAO DIA CHI - ACP.pdf
+2026-04-23 00:12:23 [INFO] Moved duplicate to /home/beenorgone/Documents/2026/04/duplicates/HD_IVAR Vietnam_170426.doc (/home/beenorgone/Documents/2026/04/documents/HD_IVAR Vietnam_170426 (1).doc	bucketed)
+2026-04-23 00:12:23 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/Safety-Data-Sheet-for-Ozone.pdf
+2026-04-23 00:12:24 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/msds 70.pdf
+2026-04-23 00:12:24 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/NC Register.pdf
+2026-04-23 00:12:24 [INFO] Processed invoice -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/04/Unknown Vendor 1300975859/1300975859_00001638.pdf
+2026-04-23 00:12:25 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/0000040.xml
+2026-04-23 00:12:25 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/Eurofins - Overdue Account Notice.pdf
+2026-04-23 00:12:25 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/TCB 426 Label Sachet Yeast Hero Protein Powder Avocado Matcha.pdf
+2026-04-23 00:12:26 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/CLAUDE.md
+2026-04-23 00:12:26 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/Label sachet Yeast Hero Overnight Protein Powder.pdf
+2026-04-23 00:12:27 [INFO] Processed UNC file -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/ngan hang/UNC/2026/04/UNC PO7529 Hoang Ha Label 1031926D21349319.pdf
+2026-04-23 00:12:27 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/NOP Finding.pdf
+2026-04-23 00:12:27 [INFO] Grouped file -> /home/beenorgone/Documents/2026/04/documents/Sample IVAR Viet Nam.pdf
+2026-04-23 00:14:44 [INFO] OCR fallback used for PDF: /home/beenorgone/Documents/2026/BAN TU CONG BO SAN PHAM - BOT SUA DUA ORGANIC VEGAN 02-OCMP1.ACP.2024 FINAL.pdf

@@ -9,6 +9,7 @@ set -eu
 
 HOME_DIR=${HOME:-/home/beenorgone}
 DOCS_ROOT="${HOME_DIR}/Documents"
+DOWNLOADS_ROOT="${HOME_DIR}/Downloads"
 IVAR_DATA="${IVAR_DATA:-${DOCS_ROOT}/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu}"
 STATE_DIR="${STATE_DIR:-${DOCS_ROOT}/.auto-tasks/ivar-documents-organizer}"
 LOG_DIR="${STATE_DIR}/logs"
@@ -17,6 +18,7 @@ CURRENT_DATE="${CURRENT_DATE:-$(date '+%Y-%m-%d')}"
 CURRENT_YEAR=$(printf '%s' "$CURRENT_DATE" | cut -d- -f1)
 CURRENT_MONTH=$(printf '%s' "$CURRENT_DATE" | cut -d- -f2)
 CURRENT_DAY=$(printf '%s' "$CURRENT_DATE" | cut -d- -f3)
+CURRENT_YEAR_ROOT="${DOCS_ROOT}/${CURRENT_YEAR}"
 CURRENT_MONTH_ROOT="${DOCS_ROOT}/${CURRENT_YEAR}/${CURRENT_MONTH}"
 DRY_RUN=0
 QUIET=0
@@ -108,6 +110,22 @@ require_command() {
 
 sha256_file() {
   sha256sum "$1" | awk '{print $1}'
+}
+
+file_mtime_of() {
+  if stat -c '%Y' "$1" >/dev/null 2>&1; then
+    stat -c '%Y' "$1"
+  else
+    stat -f '%m' "$1"
+  fi
+}
+
+file_size_of() {
+  if stat -c '%s' "$1" >/dev/null 2>&1; then
+    stat -c '%s' "$1"
+  else
+    stat -f '%z' "$1"
+  fi
 }
 
 db_exec() {
@@ -335,14 +353,14 @@ norm = normalize_ascii(text).upper()
 filename = os.path.basename(file_path)
 filename_norm = normalize_ascii(filename).upper()
 
-is_invoice = 0
-if (
-    "HOA DON GIA TRI GIA TANG" in norm
-    or "VAT INVOICE" in norm
-    or "ELECTRONIC INVOICE DISPLAY" in norm
-    or ("MA CQT" in norm and "KY HIEU" in norm and "SO:" in norm)
-):
-    is_invoice = 1
+has_vat_title = "HOA DON GIA TRI GIA TANG" in norm or "VAT INVOICE" in norm
+has_invoice_markers = (
+    ("MA CQT" in norm or "MA CQT (CODE)" in norm)
+    or "KY HIEU" in norm
+    or "SO (NO.)" in norm
+    or re.search(r"\bSO\s*:\s*\d", norm) is not None
+)
+is_invoice = 1 if (has_vat_title and has_invoice_markers) else 0
 
 is_meta = 0
 if (
@@ -377,16 +395,49 @@ for idx, line in enumerate(lines):
                     break
             break
 
-seller_patterns = [
-    r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
-    r"TEN DON VI\s*:\s*([^\n]+)",
-    r"NGUOI BAN\s*:\s*([^\n]+)",
-]
-for pattern in seller_patterns:
-    match = re.search(pattern, norm)
-    if match:
-      vendor_name = normalize_spaces(match.group(1))
-      break
+if not vendor_name:
+    for idx, line in enumerate(lines):
+        if line.startswith("TEN NGUOI NOP THUE:"):
+            candidate = normalize_spaces(line.split(":", 1)[1])
+            if candidate:
+                vendor_name = candidate
+                for follow in lines[idx + 1 : idx + 4]:
+                    if follow.startswith("MA SO THUE:"):
+                        vendor_tax = re.sub(r"\D", "", follow.split(":", 1)[1])
+                        break
+                break
+
+if not vendor_name:
+    seller_patterns = [
+        r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
+        r"TEN DON VI\s*:\s*([^\n]+)",
+        r"NGUOI BAN\s*:\s*([^\n]+)",
+    ]
+    for pattern in seller_patterns:
+        match = re.search(pattern, norm)
+        if match:
+            vendor_name = normalize_spaces(match.group(1))
+            break
+
+if not vendor_name:
+    signed_by_match = re.search(r"KY BOI\s*\(SIGNED BY\)\s*:\s*(.+?)\s*KY NGAY\s*\(SIGNING DATE\)\s*:", norm, re.S)
+    if signed_by_match:
+        signed_name = normalize_spaces(signed_by_match.group(1))
+        if signed_name:
+            vendor_name = signed_name
+
+if not vendor_name:
+    top_lines = []
+    for line in lines:
+        if not line:
+            continue
+        if "MA SO THUE" in line or "TAX CODE" in line:
+            break
+        if "HOA DON GIA TRI GIA TANG" in line or "VAT INVOICE" in line:
+            break
+        top_lines.append(line)
+    if top_lines:
+        vendor_name = normalize_spaces(" ".join(top_lines[-2:]))
 
 if not vendor_name:
     for idx, line in enumerate(lines):
@@ -582,15 +633,48 @@ process_unc_pdf() {
   file_mtime=$4
   file_size=$5
   sha=$6
-  copy_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+  is_meta=$7
+  if [ -z "$invoice_year" ]; then
+    invoice_year=$CURRENT_YEAR
+  fi
+  if [ -z "$invoice_month" ]; then
+    invoice_month=$CURRENT_MONTH
+  fi
   move_dir="${IVAR_DATA}/ngan hang/UNC/${invoice_year}/${invoice_month}"
-  ensure_dir "$copy_dir"
   ensure_dir "$move_dir"
-  copy_if_needed "$source_path" "$copy_dir"
+  if [ "$is_meta" = "1" ]; then
+    copy_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+    ensure_dir "$copy_dir"
+    copy_if_needed "$source_path" "$copy_dir"
+    note="facebook-unc"
+  else
+    note="unc"
+  fi
   target="${move_dir}/$(basename "$source_path")"
   run_cmd mv "$source_path" "$target"
   info "Processed UNC file -> $target"
-  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "unc" "$invoice_year" "$invoice_month" "" "" "" "facebook-unc"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "unc" "$invoice_year" "$invoice_month" "" "" "" "$note"
+}
+
+process_general_bucket() {
+  source_path=$1
+  file_mtime=$2
+  file_size=$3
+  sha=$4
+  if [ "$CURRENT_DAY" != "01" ] && [ "$DEEP_MODE" -ne 1 ]; then
+    info "No special rule matched; keeping file in place: $source_path"
+    return 0
+  fi
+  bucket=$(classify_general_bucket "$source_path")
+  dest_dir="${CURRENT_MONTH_ROOT}/${bucket}"
+  ensure_dir "$dest_dir"
+  target="${dest_dir}/$(basename "$source_path")"
+  if [ -e "$target" ]; then
+    target="${dest_dir}/${sha}_$(basename "$source_path")"
+  fi
+  run_cmd mv "$source_path" "$target"
+  info "Grouped file -> $target"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "bucketed" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$bucket"
 }
 
 process_invoice_pdf() {
@@ -606,16 +690,15 @@ process_invoice_pdf() {
   sha=${10}
 
   vendor_folder=$vendor_name
-  if [ -n "$vendor_tax" ]; then
+  if [ -n "$vendor_folder" ] && [ -n "$vendor_tax" ]; then
     vendor_folder="${vendor_folder} ${vendor_tax}"
   fi
   vendor_folder=$(printf '%s' "$vendor_folder" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
-  if [ -z "$vendor_folder" ]; then
-    vendor_folder="Unknown Vendor"
-  fi
 
-  if [ -n "$invoice_year" ] && [ -n "$invoice_month" ]; then
+  if [ -n "$invoice_year" ] && [ -n "$invoice_month" ] && [ -n "$vendor_folder" ]; then
     dest_dir="${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}/${vendor_folder}"
+  elif [ -n "$invoice_year" ] && [ -n "$invoice_month" ]; then
+    dest_dir="${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}"
   else
     dest_dir="${IVAR_DATA}/hoa don dau vao"
   fi
@@ -689,90 +772,118 @@ maybe_rollover_previous_month() {
   done
 }
 
-scan_current_month() {
-  if [ ! -d "$CURRENT_MONTH_ROOT" ]; then
-    warn "Current month folder not found: $CURRENT_MONTH_ROOT"
+process_source_file() {
+  source_path=$1
+  tmp_root=$2
+
+  if [ ! -f "$source_path" ]; then
+    info "Skipping missing file: $source_path"
     return 0
   fi
 
-  info "Scanning current month folder: $CURRENT_MONTH_ROOT"
-  tmp_root=$(tmp_dir_make)
-  trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
+  file_mtime=$(file_mtime_of "$source_path")
+  file_size=$(file_size_of "$source_path")
 
-  find "$CURRENT_MONTH_ROOT" -type f \
-    ! -path "*/duplicates/*" \
-    ! -path "*/documents/*" \
-    ! -path "*/photos/*" \
-    ! -path "*/media/*" \
-    ! -name '.*' | while IFS= read -r source_path; do
+  if [ "$(db_seen_source "$source_path" "$file_mtime" "$file_size")" = "1" ]; then
+    info "Skipping already processed file: $source_path"
+    return 0
+  fi
 
-    file_mtime=$(stat -c '%Y' "$source_path" 2>/dev/null || stat -f '%m' "$source_path")
-    file_size=$(stat -c '%s' "$source_path" 2>/dev/null || stat -f '%z' "$source_path")
+  sha=$(sha256_file "$source_path")
+  dup_record=$(db_find_sha "$sha")
+  if [ -n "$dup_record" ]; then
+    duplicate_target=$(move_to_duplicate "$source_path" "$CURRENT_YEAR" "$CURRENT_MONTH" "$sha" "$dup_record")
+    record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$dup_record"
+    return 0
+  fi
 
-    if [ "$(db_seen_source "$source_path" "$file_mtime" "$file_size")" = "1" ]; then
-      info "Skipping already processed file: $source_path"
-      continue
+  text_file="${tmp_root}/$(basename "$source_path").txt"
+  extract_text_for_file "$source_path" "$text_file"
+
+  file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+  file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
+  parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+  is_invoice=$(printf '%s' "$parsed" | cut -f1)
+  invoice_year=$(printf '%s' "$parsed" | cut -f2)
+  invoice_month=$(printf '%s' "$parsed" | cut -f3)
+  invoice_day=$(printf '%s' "$parsed" | cut -f4)
+  vendor_name=$(printf '%s' "$parsed" | cut -f5)
+  vendor_tax=$(printf '%s' "$parsed" | cut -f6)
+  invoice_no=$(printf '%s' "$parsed" | cut -f7)
+  is_meta=$(printf '%s' "$parsed" | cut -f8)
+  seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
+
+  if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
+    if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+      process_unc_pdf "$source_path" "$invoice_year" "$invoice_month" "$file_mtime" "$file_size" "$sha" "$is_meta"
+      return 0
     fi
-
-    sha=$(sha256_file "$source_path")
-    dup_record=$(db_find_sha "$sha")
-    if [ -n "$dup_record" ]; then
-      duplicate_target=$(move_to_duplicate "$source_path" "$CURRENT_YEAR" "$CURRENT_MONTH" "$sha" "$dup_record")
-      record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$dup_record"
-      continue
-    fi
-
-    text_file="${tmp_root}/$(basename "$source_path").txt"
-    extract_text_for_file "$source_path" "$text_file"
-
-    file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
-    parsed=$(parse_invoice_metadata "$text_file" "$source_path")
-    is_invoice=$(printf '%s' "$parsed" | cut -f1)
-    invoice_year=$(printf '%s' "$parsed" | cut -f2)
-    invoice_month=$(printf '%s' "$parsed" | cut -f3)
-    invoice_day=$(printf '%s' "$parsed" | cut -f4)
-    vendor_name=$(printf '%s' "$parsed" | cut -f5)
-    vendor_tax=$(printf '%s' "$parsed" | cut -f6)
-    invoice_no=$(printf '%s' "$parsed" | cut -f7)
-    is_meta=$(printf '%s' "$parsed" | cut -f8)
-    seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
-
-    if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
-      if printf '%s\n%s\n' "$file_lower" "$vendor_name $vendor_tax $invoice_no $is_meta $(cat "$text_file" 2>/dev/null)" | tr '[:lower:]' '[:upper:]' | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI|FACEBOOK ADS|FBADS|META PLATFORMS'; then
-        if printf '%s\n%s\n' "$vendor_name $vendor_tax $invoice_no $is_meta" "$(cat "$text_file" 2>/dev/null)" | tr '[:lower:]' '[:upper:]' | grep -Eq 'FACEBOOK ADS|FBADS|META PLATFORMS'; then
-          process_unc_pdf "$source_path" "$invoice_year" "$invoice_month" "$file_mtime" "$file_size" "$sha"
-          continue
-        fi
-      fi
 
       if [ "$is_invoice" = "1" ]; then
         if [ "$seller_is_ivar" = "1" ] && [ "$is_meta" != "1" ]; then
           info "Skipping outgoing IVAR invoice: $source_path"
-          continue
-        fi
-        if [ -z "$vendor_name" ]; then
-          vendor_name="Unknown Vendor"
+          return 0
         fi
         if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
           info "Invoice date not found in content; keeping at hoa don dau vao root: $source_path"
         fi
-        process_invoice_pdf \
-          "$source_path" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" \
-          "$invoice_no" "$is_meta" "$file_mtime" "$file_size" "$sha"
-        continue
-      fi
+      process_invoice_pdf \
+        "$source_path" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" \
+        "$invoice_no" "$is_meta" "$file_mtime" "$file_size" "$sha"
+      return 0
     fi
+  fi
 
-    if printf '%s' "$(basename "$source_path")" | grep -Eq '[Pp][Oo][[:space:]_-]*[0-9]+'; then
-      process_po_document "$source_path" "$file_mtime" "$file_size" "$sha"
-      continue
-    fi
+  if printf '%s' "$(basename "$source_path")" | grep -Eq '[Pp][Oo][[:space:]_-]*[0-9]+'; then
+    process_po_document "$source_path" "$file_mtime" "$file_size" "$sha"
+    return 0
+  fi
 
-    info "No accounting rule matched; left in place: $source_path"
-  done
+  process_general_bucket "$source_path" "$file_mtime" "$file_size" "$sha"
+}
+
+scan_current_month() {
+  tmp_root=$(tmp_dir_make)
+  trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
+
+  if [ -d "$CURRENT_YEAR_ROOT" ]; then
+    info "Scanning loose files in current year root: $CURRENT_YEAR_ROOT"
+    find "$CURRENT_YEAR_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
+      process_source_file "$source_path" "$tmp_root"
+    done
+  else
+    warn "Current year folder not found: $CURRENT_YEAR_ROOT"
+  fi
+
+  if [ -d "$DOCS_ROOT" ]; then
+    info "Scanning loose files in Documents root: $DOCS_ROOT"
+    find "$DOCS_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
+      process_source_file "$source_path" "$tmp_root"
+    done
+  fi
+
+  if [ -d "$DOWNLOADS_ROOT" ]; then
+    info "Scanning loose files in Downloads root: $DOWNLOADS_ROOT"
+    find "$DOWNLOADS_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
+      process_source_file "$source_path" "$tmp_root"
+    done
+  fi
 
   cleanup_dir "$tmp_root"
   trap - EXIT INT TERM
+}
+
+run_rup_prj() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "DRY-RUN bash -ic 'rup-prj'"
+    return 0
+  fi
+
+  if bash -ic 'rup-prj' >/dev/null 2>&1; then
+    info "Completed rup-prj."
+  else
+    warn "rup-prj failed."
+  fi
 }
 
 main() {
@@ -784,7 +895,7 @@ main() {
 
   info "=== IVAR Accounting File Sync ==="
   info "Date: $CURRENT_DATE"
-  info "Source month root: $CURRENT_MONTH_ROOT"
+  info "Source year root: $CURRENT_YEAR_ROOT"
   info "Destination root: $IVAR_DATA"
   info "State DB: $DB_PATH"
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -803,6 +914,7 @@ main() {
   scan_current_month
 
   info "Sync completed."
+  run_rup_prj
 }
 
 main "$@"

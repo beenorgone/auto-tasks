@@ -23,14 +23,16 @@ CURRENT_MONTH_ROOT="${DOCS_ROOT}/${CURRENT_YEAR}/${CURRENT_MONTH}"
 DRY_RUN=0
 QUIET=0
 DEEP_MODE=0
+NO_SYNC=0
 
 usage() {
   cat <<'EOF'
-Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--quiet]
+Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--no-sync] [--quiet]
 
 Options:
   --dry-run   Print planned actions without moving/copying files or writing DB.
   --deep      Force month-end rollover logic as if today were the first day of next month.
+  --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
 EOF
@@ -43,6 +45,9 @@ while [ $# -gt 0 ]; do
       ;;
     --deep)
       DEEP_MODE=1
+      ;;
+    --no-sync)
+      NO_SYNC=1
       ;;
     --quiet)
       QUIET=1
@@ -917,6 +922,11 @@ scan_current_month() {
 }
 
 run_rup_prj() {
+  if [ "$NO_SYNC" -eq 1 ]; then
+    info "Skipping rclone project sync because --no-sync was provided."
+    return 0
+  fi
+
   if [ "$DRY_RUN" -eq 1 ]; then
     info "DRY-RUN (cd ${HOME_DIR} && rclone copy Documents/Drives/gDriveProjects/ beenorgone-gDrive: --drive-import-formats xlsx,docx,pptx,odt,ods,odp --drive-skip-gdocs --drive-auth-owner-only=true --filter-from=.rclone-filters-gprj --skip-links --stats=30s --stats-one-line --log-level ERROR)"
     return 0
@@ -967,6 +977,9 @@ main() {
   fi
   if [ "$DEEP_MODE" -eq 1 ]; then
     info "Running in deep mode"
+  fi
+  if [ "$NO_SYNC" -eq 1 ]; then
+    info "Running with rclone sync disabled"
   fi
 
   if [ ! -d "$IVAR_DATA" ]; then

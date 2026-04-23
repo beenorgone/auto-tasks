@@ -203,3 +203,38 @@
 2026-04-23 01:12:12 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
 2026-04-23 01:12:12 [INFO] Sync completed.
 2026-04-23 01:28:54 [INFO] Completed rclone project sync.
+2026-04-23 03:01:30 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 03:01:30 [INFO] Date: 2026-04-23
+2026-04-23 03:01:30 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 03:01:30 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 03:01:30 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 03:01:30 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 03:01:30 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/Label sachet Yeast Hero Protein Avocado Matcha.png
+2026-04-23 03:01:30 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 03:01:30 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 03:01:30 [INFO] Sync completed.
+2026-04-23 18:34:09 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 18:34:09 [INFO] Date: 2026-04-23
+2026-04-23 18:34:09 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 18:34:09 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 18:34:09 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 18:34:09 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 18:34:10 [INFO] Processed invoice -> /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau vao/2026/03/0109867256_107975180130-A11.pdf
+2026-04-23 18:34:10 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/TCB 426 Label Sachet Organic Matcha Powder Bột matcha powder hữu cơ The An Organics.pdf
+2026-04-23 18:34:10 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/TCB 426 Label Organic Matcha Powder The An Organics.pdf
+2026-04-23 18:34:10 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 18:34:10 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 18:34:10 [INFO] Sync completed.
+2026-04-23 18:35:05 [INFO] === IVAR Accounting File Sync ===
+2026-04-23 18:35:05 [INFO] Date: 2026-04-23
+2026-04-23 18:35:05 [INFO] Source year root: /home/beenorgone/Documents/2026
+2026-04-23 18:35:05 [INFO] Destination root: /home/beenorgone/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu
+2026-04-23 18:35:05 [INFO] State DB: /home/beenorgone/Documents/.auto-tasks/ivar-documents-organizer/processed.db
+2026-04-23 18:35:05 [INFO] Scanning loose files in current year root: /home/beenorgone/Documents/2026
+2026-04-23 18:35:05 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/TCB 426 Label Sachet Organic Matcha Powder Bột matcha powder hữu cơ The An Organics.pdf
+2026-04-23 18:35:05 [INFO] No special rule matched; keeping file in place: /home/beenorgone/Documents/2026/TCB 426 Label Organic Matcha Powder The An Organics.pdf
+2026-04-23 18:35:05 [INFO] Scanning loose files in Documents root: /home/beenorgone/Documents
+2026-04-23 18:35:05 [INFO] Scanning loose files in Downloads root: /home/beenorgone/Downloads
+2026-04-23 18:35:05 [INFO] Sync completed.
+2026-04-23 18:50:59 [INFO] Completed rclone project sync.
+2026-04-23 18:51:46 [INFO] Completed rclone project sync.

@@ -283,7 +283,7 @@ extract_pdf_text() {
   : >"$out_file"
 
   if command -v pdftotext >/dev/null 2>&1; then
-    pdftotext "$pdf_path" - 2>/dev/null >"$out_file" || true
+    pdftotext -layout "$pdf_path" - 2>/dev/null >"$out_file" || true
   fi
 
   if [ "$(wc -c <"$out_file" | tr -d ' ')" -ge 80 ]; then
@@ -298,8 +298,8 @@ extract_pdf_text() {
       for image_path in "${ocr_dir}"/page-*.png; do
         if [ -f "$image_path" ]; then
           found_png=1
-          tesseract "$image_path" stdout -l vie+eng 2>/dev/null >>"$out_file" || \
-            tesseract "$image_path" stdout -l eng 2>/dev/null >>"$out_file" || true
+          tesseract "$image_path" stdout -l vie+eng --psm 6 -c preserve_interword_spaces=1 2>/dev/null >>"$out_file" || \
+            tesseract "$image_path" stdout -l eng --psm 6 -c preserve_interword_spaces=1 2>/dev/null >>"$out_file" || true
           printf '\n' >>"$out_file"
         fi
       done
@@ -349,12 +349,18 @@ except OSError:
 def normalize_spaces(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
-def normalize_ascii(value: str) -> str:
+def strip_accents(value: str) -> str:
+    value = value.replace("Đ", "D").replace("đ", "d")
     value = unicodedata.normalize("NFKD", value)
-    value = value.encode("ascii", "ignore").decode("ascii")
-    return normalize_spaces(value)
+    return value.encode("ascii", "ignore").decode("ascii")
 
-norm = normalize_ascii(text).upper()
+def normalize_ascii(value: str) -> str:
+    return normalize_spaces(strip_accents(value))
+
+def normalize_ascii_text(value: str) -> str:
+    return strip_accents(value)
+
+norm = normalize_ascii_text(text).upper()
 filename = os.path.basename(file_path)
 filename_norm = normalize_ascii(filename).upper()
 
@@ -385,11 +391,56 @@ invoice_no = ""
 invoice_year = ""
 invoice_month = ""
 invoice_day = ""
+buyer_is_ivar = 0
 seller_is_ivar = 0
 
 lines = [normalize_spaces(line) for line in norm.splitlines()]
 
+buyer_section = ""
+buyer_match = re.search(
+    r"(HO TEN NGUOI MUA HANG|CUSTOMER'?S NAME|NGUOI MUA HANG)(.+?)(HINH THUC THANH TOAN|METHOD OF PAYMENT|DONG TIEN THANH TOAN|STT|NO\))",
+    norm,
+    re.S,
+)
+if buyer_match:
+    buyer_section = buyer_match.group(2)
+else:
+    buyer_tax_match = re.search(r"(TEN DON VI\s*:.*?MA SO THUE\s*:\s*0109555754)", norm, re.S)
+    if buyer_tax_match:
+        buyer_section = buyer_tax_match.group(1)
+
+if "IVAR VIET NAM" in buyer_section or "0109555754" in re.sub(r"\D", "", buyer_section):
+    buyer_is_ivar = 1
+
+if has_vat_title and buyer_is_ivar:
+    is_invoice = 1
+
+seller_patterns = [
+    r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
+    r"NGUOI BAN\s*:\s*([^\n]+)",
+]
+for pattern in seller_patterns:
+    match = re.search(pattern, norm)
+    if match:
+        vendor_name = normalize_spaces(match.group(1))
+        break
+
+if not vendor_name:
+    top_lines = []
+    for line in lines:
+        if not line:
+            continue
+        if "MA SO THUE" in line or "TAX CODE" in line:
+            break
+        if "HOA DON GIA TRI GIA TANG" in line or "VAT INVOICE" in line:
+            break
+        top_lines.append(line)
+    if top_lines:
+        vendor_name = normalize_spaces(" ".join(top_lines[-2:]))
+
 for idx, line in enumerate(lines):
+    if vendor_name:
+        break
     if line.startswith("TEN DON VI:"):
         candidate = normalize_spaces(line.split(":", 1)[1])
         if candidate:
@@ -413,36 +464,11 @@ if not vendor_name:
                 break
 
 if not vendor_name:
-    seller_patterns = [
-        r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
-        r"TEN DON VI\s*:\s*([^\n]+)",
-        r"NGUOI BAN\s*:\s*([^\n]+)",
-    ]
-    for pattern in seller_patterns:
-        match = re.search(pattern, norm)
-        if match:
-            vendor_name = normalize_spaces(match.group(1))
-            break
-
-if not vendor_name:
     signed_by_match = re.search(r"KY BOI\s*\(SIGNED BY\)\s*:\s*(.+?)\s*KY NGAY\s*\(SIGNING DATE\)\s*:", norm, re.S)
     if signed_by_match:
         signed_name = normalize_spaces(signed_by_match.group(1))
         if signed_name:
             vendor_name = signed_name
-
-if not vendor_name:
-    top_lines = []
-    for line in lines:
-        if not line:
-            continue
-        if "MA SO THUE" in line or "TAX CODE" in line:
-            break
-        if "HOA DON GIA TRI GIA TANG" in line or "VAT INVOICE" in line:
-            break
-        top_lines.append(line)
-    if top_lines:
-        vendor_name = normalize_spaces(" ".join(top_lines[-2:]))
 
 if not vendor_name:
     for idx, line in enumerate(lines):
@@ -487,7 +513,7 @@ invoice_no_patterns = [
     r"INVOICE #\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*\n+\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*([A-Z0-9\-_./]+)",
-    r"\bSO\s*\(NO\.\)\s*:\s*([A-Z0-9\-_./]+)",
+    r"\bSO\s*\(NO\.?\)\s*:\s*([A-Z0-9\-_./]+)",
 ]
 for pattern in invoice_no_patterns:
     match = re.search(pattern, norm)
@@ -508,6 +534,10 @@ if not invoice_no:
     file_no = re.search(r"(FBADS[-_A-Z0-9]+)", filename_norm)
     if file_no:
         invoice_no = file_no.group(1)
+if not invoice_no:
+    file_no = re.search(r"([A-Z0-9]+_\d{4,})", filename_norm)
+    if file_no:
+        invoice_no = file_no.group(1)
 
 folder_name = normalize_spaces(vendor_name)
 folder_name = folder_name.replace("/", "-").replace("\\", "-").strip(" .")
@@ -523,6 +553,7 @@ print("\t".join([
     invoice_no,
     str(is_meta),
     str(seller_is_ivar),
+    str(buyer_is_ivar),
 ]))
 PY
 }
@@ -613,6 +644,43 @@ build_invoice_filename() {
   else
     printf '%s\n' "$base"
   fi
+}
+
+move_matching_invoice_xml() {
+  pdf_source=$1
+  dest_dir=$2
+  invoice_year=$3
+  invoice_month=$4
+  vendor_name=$5
+  vendor_tax=$6
+  invoice_no=$7
+
+  source_dir=$(dirname "$pdf_source")
+  base=$(basename "$pdf_source")
+  stem=${base%.*}
+  xml_source=""
+
+  if [ -f "${source_dir}/${stem}.xml" ]; then
+    xml_source="${source_dir}/${stem}.xml"
+  elif [ -f "${source_dir}/${stem}.XML" ]; then
+    xml_source="${source_dir}/${stem}.XML"
+  fi
+
+  if [ -z "$xml_source" ]; then
+    return 0
+  fi
+
+  xml_sha=$(sha256_file "$xml_source")
+  xml_mtime=$(file_mtime_of "$xml_source")
+  xml_size=$(file_size_of "$xml_source")
+  xml_target="${dest_dir}/$(basename "$xml_source")"
+  if [ -e "$xml_target" ]; then
+    xml_target="${dest_dir}/${xml_sha}_$(basename "$xml_source")"
+  fi
+
+  run_cmd mv "$xml_source" "$xml_target"
+  info "Moved matching invoice XML -> $xml_target"
+  record_processed "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target" "invoice-xml" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" "matching-pdf"
 }
 
 process_po_document() {
@@ -756,6 +824,7 @@ process_invoice_pdf() {
   fi
   run_cmd mv "$source_path" "$target"
   info "Processed invoice -> $target"
+  move_matching_invoice_xml "$source_path" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "invoice" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" ""
 }
 
@@ -838,6 +907,17 @@ process_source_file() {
   extract_text_for_file "$source_path" "$text_file"
 
   file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+  case "$file_lower" in
+    *.xml)
+      source_dir=$(dirname "$source_path")
+      base=$(basename "$source_path")
+      stem=${base%.*}
+      if [ -f "${source_dir}/${stem}.pdf" ] || [ -f "${source_dir}/${stem}.PDF" ]; then
+        info "Keeping matching invoice XML in place until PDF is processed: $source_path"
+        return 0
+      fi
+      ;;
+  esac
   file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
   parsed=$(parse_invoice_metadata "$text_file" "$source_path")
   is_invoice=$(printf '%s' "$parsed" | cut -f1)
@@ -849,6 +929,7 @@ process_source_file() {
   invoice_no=$(printf '%s' "$parsed" | cut -f7)
   is_meta=$(printf '%s' "$parsed" | cut -f8)
   seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
+  buyer_is_ivar=$(printf '%s' "$parsed" | cut -f10)
 
   if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
     if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
@@ -857,7 +938,7 @@ process_source_file() {
     fi
 
       if [ "$is_invoice" = "1" ]; then
-        if [ "$seller_is_ivar" = "1" ] && [ "$is_meta" != "1" ]; then
+        if [ "$seller_is_ivar" = "1" ] && [ "$buyer_is_ivar" != "1" ] && [ "$is_meta" != "1" ]; then
           info "Skipping outgoing IVAR invoice: $source_path"
           return 0
         fi

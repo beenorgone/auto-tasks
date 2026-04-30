@@ -14,6 +14,7 @@ IVAR_DATA="${IVAR_DATA:-${DOCS_ROOT}/Drives/gDriveProjects/Working/Projects/IVAR
 STATE_DIR="${STATE_DIR:-${DOCS_ROOT}/.auto-tasks/ivar-documents-organizer}"
 LOG_DIR="${STATE_DIR}/logs"
 DB_PATH="${STATE_DIR}/processed.db"
+VENDOR_DB_PATH="${STATE_DIR}/vendors.db"
 CURRENT_DATE="${CURRENT_DATE:-$(date '+%Y-%m-%d')}"
 CURRENT_YEAR=$(printf '%s' "$CURRENT_DATE" | cut -d- -f1)
 CURRENT_MONTH=$(printf '%s' "$CURRENT_DATE" | cut -d- -f2)
@@ -25,15 +26,17 @@ QUIET=0
 DEEP_MODE=0
 NO_SYNC=0
 RESCAN_MODE=0
+VENDOR_LIST_MODE=0
 
 usage() {
   cat <<'EOF'
-Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--no-sync] [--quiet]
+Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--vendors] [--no-sync] [--quiet]
 
 Options:
   --dry-run   Print planned actions without moving/copying files or writing DB.
   --deep      Force month-end rollover logic as if today were the first day of next month.
   --rescan    Re-read classified destination folders and restructure/rename files.
+  --vendors   Print known vendor MST/name reference from the local vendor DB.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
@@ -50,6 +53,9 @@ while [ $# -gt 0 ]; do
       ;;
     --rescan)
       RESCAN_MODE=1
+      ;;
+    --vendors)
+      VENDOR_LIST_MODE=1
       ;;
     --no-sync)
       NO_SYNC=1
@@ -272,6 +278,478 @@ db_insert() {
   db_exec "insert" "$@"
 }
 
+metadata_cache_exec() {
+  require_command python3
+  python3 - "$DB_PATH" "$@" <<'PY'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+args = sys.argv[2:]
+mode = args[0]
+
+conn = sqlite3.connect(db_path)
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS invoice_metadata_cache (
+        sha256 TEXT PRIMARY KEY,
+        is_invoice TEXT,
+        invoice_year TEXT,
+        invoice_month TEXT,
+        invoice_day TEXT,
+        vendor_name TEXT,
+        vendor_tax TEXT,
+        invoice_number TEXT,
+        is_meta TEXT,
+        seller_is_ivar TEXT,
+        buyer_is_ivar TEXT,
+        parse_source TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """
+)
+
+if mode == "get":
+    sha = args[1]
+    row = conn.execute(
+        """
+        SELECT is_invoice, invoice_year, invoice_month, invoice_day, vendor_name, vendor_tax,
+               invoice_number, is_meta, seller_is_ivar, buyer_is_ivar, parse_source
+        FROM invoice_metadata_cache
+        WHERE sha256 = ?
+        """,
+        (sha,),
+    ).fetchone()
+    if row:
+        print("\t".join(value or "" for value in row))
+    else:
+        print("")
+elif mode == "put":
+    (
+        sha,
+        is_invoice,
+        invoice_year,
+        invoice_month,
+        invoice_day,
+        vendor_name,
+        vendor_tax,
+        invoice_number,
+        is_meta,
+        seller_is_ivar,
+        buyer_is_ivar,
+        parse_source,
+    ) = args[1:13]
+    conn.execute(
+        """
+        INSERT INTO invoice_metadata_cache (
+            sha256, is_invoice, invoice_year, invoice_month, invoice_day, vendor_name,
+            vendor_tax, invoice_number, is_meta, seller_is_ivar, buyer_is_ivar, parse_source
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(sha256) DO UPDATE SET
+            is_invoice = excluded.is_invoice,
+            invoice_year = excluded.invoice_year,
+            invoice_month = excluded.invoice_month,
+            invoice_day = excluded.invoice_day,
+            vendor_name = excluded.vendor_name,
+            vendor_tax = excluded.vendor_tax,
+            invoice_number = excluded.invoice_number,
+            is_meta = excluded.is_meta,
+            seller_is_ivar = excluded.seller_is_ivar,
+            buyer_is_ivar = excluded.buyer_is_ivar,
+            parse_source = excluded.parse_source,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            sha,
+            is_invoice,
+            invoice_year,
+            invoice_month,
+            invoice_day,
+            vendor_name,
+            vendor_tax,
+            invoice_number,
+            is_meta,
+            seller_is_ivar,
+            buyer_is_ivar,
+            parse_source,
+        ),
+    )
+    conn.commit()
+else:
+    raise SystemExit(f"Unknown cache mode: {mode}")
+PY
+}
+
+metadata_cache_get() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '\n'
+    return 0
+  fi
+  metadata_cache_exec "get" "$1"
+}
+
+metadata_cache_put() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    return 0
+  fi
+  metadata_cache_exec "put" "$@"
+}
+
+metadata_cache_import_processed() {
+  if [ "$DRY_RUN" -eq 1 ] || [ ! -f "$DB_PATH" ]; then
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$DB_PATH" <<'PY'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+conn = sqlite3.connect(db_path)
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS invoice_metadata_cache (
+        sha256 TEXT PRIMARY KEY,
+        is_invoice TEXT,
+        invoice_year TEXT,
+        invoice_month TEXT,
+        invoice_day TEXT,
+        vendor_name TEXT,
+        vendor_tax TEXT,
+        invoice_number TEXT,
+        is_meta TEXT,
+        seller_is_ivar TEXT,
+        buyer_is_ivar TEXT,
+        parse_source TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """
+)
+conn.execute(
+    """
+    DELETE FROM invoice_metadata_cache
+    WHERE vendor_name = 'Unknown Vendor'
+       OR invoice_year NOT BETWEEN '2000' AND '2027'
+    """
+)
+conn.execute(
+    """
+    INSERT INTO invoice_metadata_cache (
+        sha256, is_invoice, invoice_year, invoice_month, invoice_day, vendor_name,
+        vendor_tax, invoice_number, is_meta, seller_is_ivar, buyer_is_ivar, parse_source
+    )
+    SELECT sha256, '1', invoice_year, invoice_month, '', vendor_name, vendor_tax,
+           invoice_number, CASE WHEN notes LIKE '%facebook%' THEN '1' ELSE '0' END,
+           CASE WHEN vendor_tax = '0109555754' THEN '1' ELSE '0' END,
+           '1',
+           'processed-db'
+    FROM processed_files
+    WHERE status = 'invoice'
+      AND COALESCE(sha256, '') <> ''
+      AND COALESCE(vendor_tax, '') <> ''
+      AND COALESCE(invoice_number, '') <> ''
+      AND COALESCE(vendor_name, '') <> ''
+      AND vendor_name <> 'Unknown Vendor'
+      AND invoice_year BETWEEN '2000' AND '2027'
+    ON CONFLICT(sha256) DO NOTHING
+    """
+)
+conn.commit()
+PY
+}
+
+vendor_db_upsert() {
+  vendor_name=$1
+  vendor_tax=$2
+  invoice_year=$3
+  invoice_month=$4
+  source_path=$5
+  final_path=$6
+
+  if [ "$DRY_RUN" -eq 1 ] || [ -z "$vendor_name" ] || [ -z "$vendor_tax" ]; then
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$VENDOR_DB_PATH" "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$source_path" "$final_path" <<'PY'
+import re
+import sqlite3
+import sys
+import unicodedata
+
+db_path, vendor_name, vendor_tax, invoice_year, invoice_month, source_path, final_path = sys.argv[1:8]
+
+def normalize_spaces(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+def strip_accents(value: str) -> str:
+    value = (value or "").replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    return value.encode("ascii", "ignore").decode("ascii")
+
+def folder_name(name: str, tax: str) -> str:
+    value = normalize_spaces(name)
+    value = value.replace("/", "-").replace("\\", "-").strip(" .")
+    if tax:
+        value = normalize_spaces(f"{value} {tax}")
+    return value
+
+def usable_vendor(name: str, tax: str) -> bool:
+    if not name or not tax or tax == "0109555754":
+        return False
+    name_ascii = normalize_spaces(strip_accents(name)).upper()
+    bad_markers = (
+        "UNKNOWN VENDOR",
+        "KY HIEU",
+        "SO (NO",
+        "SO NO",
+        "DIA CHI",
+        "ADDRESS",
+        "DON VI CUNG CAP",
+        "DC:",
+        "TEL:",
+    )
+    return len(name_ascii) <= 140 and not any(marker in name_ascii for marker in bad_markers)
+
+vendor_name = normalize_spaces(vendor_name)
+vendor_tax = re.sub(r"\D", "", vendor_tax)
+if not usable_vendor(vendor_name, vendor_tax):
+    raise SystemExit
+vendor_name_ascii = normalize_spaces(strip_accents(vendor_name)).upper()
+folder = folder_name(vendor_name, vendor_tax)
+
+conn = sqlite3.connect(db_path)
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS vendors (
+        vendor_tax TEXT PRIMARY KEY,
+        vendor_name TEXT NOT NULL,
+        vendor_name_ascii TEXT,
+        folder_name TEXT,
+        first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        seen_count INTEGER NOT NULL DEFAULT 1,
+        last_invoice_year TEXT,
+        last_invoice_month TEXT,
+        last_source_path TEXT,
+        last_final_path TEXT
+    )
+    """
+)
+conn.execute("CREATE INDEX IF NOT EXISTS idx_vendors_name_ascii ON vendors(vendor_name_ascii)")
+row = conn.execute("SELECT seen_count FROM vendors WHERE vendor_tax = ?", (vendor_tax,)).fetchone()
+if row:
+    conn.execute(
+        """
+        UPDATE vendors
+        SET vendor_name = ?,
+            vendor_name_ascii = ?,
+            folder_name = ?,
+            last_seen_at = CURRENT_TIMESTAMP,
+            seen_count = seen_count + 1,
+            last_invoice_year = ?,
+            last_invoice_month = ?,
+            last_source_path = ?,
+            last_final_path = ?
+        WHERE vendor_tax = ?
+        """,
+        (vendor_name, vendor_name_ascii, folder, invoice_year, invoice_month, source_path, final_path, vendor_tax),
+    )
+else:
+    conn.execute(
+        """
+        INSERT INTO vendors (
+            vendor_tax, vendor_name, vendor_name_ascii, folder_name,
+            last_invoice_year, last_invoice_month, last_source_path, last_final_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (vendor_tax, vendor_name, vendor_name_ascii, folder, invoice_year, invoice_month, source_path, final_path),
+    )
+conn.commit()
+PY
+}
+
+vendor_db_import_processed() {
+  if [ "$DRY_RUN" -eq 1 ] || [ ! -f "$DB_PATH" ]; then
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$VENDOR_DB_PATH" "$DB_PATH" <<'PY'
+import re
+import sqlite3
+import sys
+import unicodedata
+
+vendor_db_path, processed_db_path = sys.argv[1:3]
+
+def normalize_spaces(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+def strip_accents(value: str) -> str:
+    value = (value or "").replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    return value.encode("ascii", "ignore").decode("ascii")
+
+def folder_name(name: str, tax: str) -> str:
+    value = normalize_spaces(name)
+    value = value.replace("/", "-").replace("\\", "-").strip(" .")
+    if tax:
+        value = normalize_spaces(f"{value} {tax}")
+    return value
+
+def usable_vendor(name: str, tax: str) -> bool:
+    if not name or not tax or tax == "0109555754":
+        return False
+    name_ascii = normalize_spaces(strip_accents(name)).upper()
+    bad_markers = (
+        "UNKNOWN VENDOR",
+        "KY HIEU",
+        "SO (NO",
+        "SO NO",
+        "DIA CHI",
+        "ADDRESS",
+        "DON VI CUNG CAP",
+        "DC:",
+        "TEL:",
+    )
+    return len(name_ascii) <= 140 and not any(marker in name_ascii for marker in bad_markers)
+
+vendor_conn = sqlite3.connect(vendor_db_path)
+vendor_conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS vendors (
+        vendor_tax TEXT PRIMARY KEY,
+        vendor_name TEXT NOT NULL,
+        vendor_name_ascii TEXT,
+        folder_name TEXT,
+        first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        seen_count INTEGER NOT NULL DEFAULT 1,
+        last_invoice_year TEXT,
+        last_invoice_month TEXT,
+        last_source_path TEXT,
+        last_final_path TEXT
+    )
+    """
+)
+vendor_conn.execute("CREATE INDEX IF NOT EXISTS idx_vendors_name_ascii ON vendors(vendor_name_ascii)")
+vendor_conn.execute(
+    """
+    DELETE FROM vendors
+    WHERE vendor_tax = '0109555754'
+       OR vendor_name_ascii LIKE '%UNKNOWN VENDOR%'
+       OR vendor_name_ascii LIKE '%KY HIEU%'
+       OR vendor_name_ascii LIKE '%SO (NO%'
+       OR vendor_name_ascii LIKE '%SO NO%'
+       OR vendor_name_ascii LIKE '%DIA CHI%'
+       OR vendor_name_ascii LIKE '%ADDRESS%'
+       OR vendor_name_ascii LIKE '%DON VI CUNG CAP%'
+       OR vendor_name_ascii LIKE '%DC:%'
+       OR vendor_name_ascii LIKE '%TEL:%'
+       OR last_invoice_year > '2027'
+       OR LENGTH(vendor_name_ascii) > 140
+    """
+)
+
+processed_conn = sqlite3.connect(processed_db_path)
+rows = processed_conn.execute(
+    """
+    SELECT vendor_tax, vendor_name, invoice_year, invoice_month, source_path, final_path, COUNT(*) AS seen_count
+    FROM processed_files
+    WHERE status IN ('invoice', 'invoice-xml')
+      AND COALESCE(vendor_tax, '') <> ''
+      AND COALESCE(vendor_name, '') <> ''
+      AND (COALESCE(invoice_year, '') = '' OR invoice_year BETWEEN '2000' AND '2027')
+    GROUP BY vendor_tax
+    ORDER BY MAX(id)
+    """
+).fetchall()
+
+for vendor_tax, vendor_name, invoice_year, invoice_month, source_path, final_path, seen_count in rows:
+    vendor_tax = re.sub(r"\D", "", vendor_tax or "")
+    vendor_name = normalize_spaces(vendor_name)
+    if not usable_vendor(vendor_name, vendor_tax):
+        continue
+    vendor_name_ascii = normalize_spaces(strip_accents(vendor_name)).upper()
+    folder = folder_name(vendor_name, vendor_tax)
+    vendor_conn.execute(
+        """
+        INSERT INTO vendors (
+            vendor_tax, vendor_name, vendor_name_ascii, folder_name, seen_count,
+            last_invoice_year, last_invoice_month, last_source_path, last_final_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(vendor_tax) DO UPDATE SET
+            vendor_name = excluded.vendor_name,
+            vendor_name_ascii = excluded.vendor_name_ascii,
+            folder_name = excluded.folder_name,
+            seen_count = MAX(vendors.seen_count, excluded.seen_count),
+            last_seen_at = CURRENT_TIMESTAMP,
+            last_invoice_year = excluded.last_invoice_year,
+            last_invoice_month = excluded.last_invoice_month,
+            last_source_path = excluded.last_source_path,
+            last_final_path = excluded.last_final_path
+        """,
+        (vendor_tax, vendor_name, vendor_name_ascii, folder, int(seen_count), invoice_year, invoice_month, source_path, final_path),
+    )
+
+vendor_conn.commit()
+PY
+}
+
+vendor_db_list() {
+  if [ ! -f "$VENDOR_DB_PATH" ]; then
+    warn "Vendor DB not found: $VENDOR_DB_PATH"
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$VENDOR_DB_PATH" <<'PY'
+import sqlite3
+import sys
+
+conn = sqlite3.connect(sys.argv[1])
+rows = conn.execute(
+    """
+    SELECT vendor_tax, vendor_name, seen_count, COALESCE(last_invoice_year, ''), COALESCE(last_invoice_month, '')
+    FROM vendors
+    ORDER BY vendor_name_ascii, vendor_tax
+    """
+).fetchall()
+print("MST\tVendor\tSeen\tLast year\tLast month")
+for row in rows:
+    print("\t".join(str(value) for value in row))
+PY
+}
+
+vendor_db_lookup_name() {
+  vendor_tax=$1
+  if [ -z "$vendor_tax" ] || [ ! -f "$VENDOR_DB_PATH" ]; then
+    printf '\n'
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$VENDOR_DB_PATH" "$vendor_tax" <<'PY'
+import re
+import sqlite3
+import sys
+
+db_path, vendor_tax = sys.argv[1:3]
+vendor_tax = re.sub(r"\D", "", vendor_tax)
+conn = sqlite3.connect(db_path)
+try:
+    row = conn.execute("SELECT vendor_name FROM vendors WHERE vendor_tax = ?", (vendor_tax,)).fetchone()
+except sqlite3.Error:
+    row = None
+print(row[0] if row else "")
+PY
+}
+
 tmp_dir_make() {
   mktemp -d "${TMPDIR:-/tmp}/ivar-accounting-sync.XXXXXX"
 }
@@ -340,6 +818,7 @@ import os
 import re
 import sys
 import unicodedata
+from datetime import date
 
 text_path = sys.argv[1]
 file_path = sys.argv[2]
@@ -537,6 +1016,7 @@ if invoice_year and (
     not re.fullmatch(r"20\d{2}", invoice_year)
     or not invoice_month.isdigit()
     or not 1 <= int(invoice_month) <= 12
+    or int(invoice_year) > date.today().year + 1
 ):
     invoice_year = ""
     invoice_month = ""
@@ -597,6 +1077,142 @@ print("\t".join([
     str(seller_is_ivar),
     str(buyer_is_ivar),
 ]))
+PY
+}
+
+parse_xml_invoice_metadata() {
+  require_command python3
+  python3 - "$1" "$2" <<'PY'
+import os
+import re
+import sys
+import unicodedata
+import xml.etree.ElementTree as ET
+
+xml_path = sys.argv[1]
+file_path = sys.argv[2]
+
+def normalize_spaces(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+def strip_accents(value: str) -> str:
+    value = (value or "").replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    return value.encode("ascii", "ignore").decode("ascii")
+
+def normalize_ascii(value: str) -> str:
+    return normalize_spaces(strip_accents(value))
+
+def child_text(parent, tag: str) -> str:
+    if parent is None:
+        return ""
+    for elem in parent.iter():
+        if elem.tag.split("}")[-1] == tag:
+            return normalize_spaces(elem.text or "")
+    return ""
+
+filename = os.path.basename(file_path)
+filename_norm = normalize_ascii(filename).upper()
+
+try:
+    root = ET.parse(xml_path).getroot()
+except Exception:
+    print("\t".join(["0", "", "", "", "", "", "", "0", "0", "0"]))
+    raise SystemExit
+
+seller = None
+buyer = None
+general = None
+for elem in root.iter():
+    local = elem.tag.split("}")[-1]
+    if local == "NBan" and seller is None:
+        seller = elem
+    elif local == "NMua" and buyer is None:
+        buyer = elem
+    elif local == "TTChung" and general is None:
+        general = elem
+
+vendor_name = child_text(seller, "Ten")
+vendor_tax = re.sub(r"\D", "", child_text(seller, "MST"))
+buyer_name = child_text(buyer, "Ten")
+buyer_tax = re.sub(r"\D", "", child_text(buyer, "MST"))
+invoice_no = child_text(general, "SHDon")
+invoice_date = child_text(general, "NLap")
+invoice_type = normalize_ascii(child_text(general, "THDon")).upper()
+
+invoice_year = ""
+invoice_month = ""
+invoice_day = ""
+date_match = re.match(r"(\d{4})-(\d{2})-(\d{2})", invoice_date)
+if date_match:
+    invoice_year, invoice_month, invoice_day = date_match.groups()
+
+is_meta = 1 if any(marker in normalize_ascii(vendor_name).upper() for marker in ("META", "FACEBOOK")) else 0
+buyer_is_ivar = 1 if buyer_tax == "0109555754" or "IVAR VIET NAM" in normalize_ascii(buyer_name).upper() else 0
+seller_is_ivar = 1 if vendor_tax == "0109555754" or "IVAR VIET NAM" in normalize_ascii(vendor_name).upper() else 0
+is_invoice = 1 if (
+    "GTGT" in invoice_type
+    or "GIA TRI GIA TANG" in invoice_type
+    or buyer_is_ivar
+    or (vendor_tax and invoice_no and invoice_year)
+) else 0
+
+if not invoice_no:
+    file_no = re.search(r"([A-Z0-9]+_\d{4,})", filename_norm)
+    if file_no:
+        invoice_no = file_no.group(1)
+
+folder_name = normalize_ascii(vendor_name).upper()
+folder_name = folder_name.replace("/", "-").replace("\\", "-").strip(" .")
+invoice_no = invoice_no.replace("/", "-").replace("\\", "-").strip()
+
+print("\t".join([
+    str(is_invoice),
+    invoice_year,
+    invoice_month,
+    invoice_day,
+    folder_name,
+    vendor_tax,
+    invoice_no,
+    str(is_meta),
+    str(seller_is_ivar),
+    str(buyer_is_ivar),
+]))
+PY
+}
+
+parse_unc_date_metadata() {
+  require_command python3
+  python3 - "$1" <<'PY'
+import re
+import sys
+import unicodedata
+
+text_path = sys.argv[1]
+try:
+    text = open(text_path, "r", encoding="utf-8", errors="ignore").read()
+except OSError:
+    text = ""
+
+def strip_accents(value: str) -> str:
+    value = value.replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    return value.encode("ascii", "ignore").decode("ascii")
+
+norm = strip_accents(text)
+patterns = [
+    r"Ngay\s*/?\s*Date\s*:?\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})",
+    r"Date\s*:?\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})",
+    r"Ngay\s*:?\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})",
+]
+for pattern in patterns:
+    match = re.search(pattern, norm, re.I)
+    if match:
+        day, month, year = match.groups()
+        print(f"{year}\t{int(month):02d}\t{int(day):02d}")
+        raise SystemExit
+
+print("\t\t")
 PY
 }
 
@@ -955,6 +1571,7 @@ move_matching_invoice_xml() {
   run_cmd mv "$xml_source" "$xml_target"
   info "Moved matching invoice XML -> $xml_target"
   record_processed "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target" "invoice-xml" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" "matching-pdf"
+  vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$xml_source" "$xml_target"
 }
 
 process_po_document() {
@@ -1100,6 +1717,7 @@ process_invoice_pdf() {
   info "Processed invoice -> $target"
   move_matching_invoice_xml "$source_path" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "invoice" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" ""
+  vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$source_path" "$target"
 }
 
 maybe_rollover_previous_month() {
@@ -1178,8 +1796,6 @@ process_source_file() {
   fi
 
   text_file="${tmp_root}/$(basename "$source_path").txt"
-  extract_text_for_file "$source_path" "$text_file"
-
   file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
   case "$file_lower" in
     *.xml)
@@ -1193,7 +1809,50 @@ process_source_file() {
       ;;
   esac
   file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
-  parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+  parsed=""
+  parse_source=""
+  text_extracted=0
+
+  if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
+    source_dir=$(dirname "$source_path")
+    base=$(basename "$source_path")
+    stem=${base%.*}
+    xml_source=""
+    if [ -f "${source_dir}/${stem}.xml" ]; then
+      xml_source="${source_dir}/${stem}.xml"
+    elif [ -f "${source_dir}/${stem}.XML" ]; then
+      xml_source="${source_dir}/${stem}.XML"
+    fi
+
+    if [ -n "$xml_source" ]; then
+      parsed=$(parse_xml_invoice_metadata "$xml_source" "$source_path")
+      parse_source="xml"
+      info "Invoice metadata parsed from XML: $xml_source"
+    fi
+
+    if [ -z "$parsed" ]; then
+      cached=$(metadata_cache_get "$sha")
+      if [ -n "$cached" ]; then
+        cached_year=$(printf '%s' "$cached" | cut -f2)
+        cached_vendor=$(printf '%s' "$cached" | cut -f5)
+        if [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
+          parsed=$(printf '%s' "$cached" | cut -f1-10)
+          parse_source=$(printf '%s' "$cached" | cut -f11)
+          info "Invoice metadata cache hit for PDF: $source_path"
+        fi
+      fi
+    fi
+  fi
+
+  if [ -z "$parsed" ]; then
+    extract_text_for_file "$source_path" "$text_file"
+    text_extracted=1
+    parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+    parse_source="pdf-text"
+  else
+    : >"$text_file"
+  fi
+
   is_invoice=$(printf '%s' "$parsed" | cut -f1)
   invoice_year=$(printf '%s' "$parsed" | cut -f2)
   invoice_month=$(printf '%s' "$parsed" | cut -f3)
@@ -1205,8 +1864,34 @@ process_source_file() {
   seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
   buyer_is_ivar=$(printf '%s' "$parsed" | cut -f10)
 
+  if [ -z "$vendor_name" ] && [ -n "$vendor_tax" ]; then
+    vendor_name=$(vendor_db_lookup_name "$vendor_tax")
+  fi
+
   if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
+    metadata_cache_put "$sha" "$is_invoice" "$invoice_year" "$invoice_month" "$invoice_day" "$vendor_name" "$vendor_tax" "$invoice_no" "$is_meta" "$seller_is_ivar" "$buyer_is_ivar" "$parse_source"
+  fi
+
+  if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
+    needs_text_for_unc=0
+    if printf '%s\n' "$file_name_upper" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+      needs_text_for_unc=1
+    elif [ "$is_invoice" != "1" ] && [ "$text_extracted" -eq 0 ]; then
+      needs_text_for_unc=1
+    fi
+    if [ "$needs_text_for_unc" -eq 1 ] && [ "$text_extracted" -eq 0 ]; then
+      extract_text_for_file "$source_path" "$text_file"
+      text_extracted=1
+    fi
+
     if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+      unc_date=$(parse_unc_date_metadata "$text_file")
+      unc_year=$(printf '%s' "$unc_date" | cut -f1)
+      unc_month=$(printf '%s' "$unc_date" | cut -f2)
+      if [ -n "$unc_year" ] && [ -n "$unc_month" ]; then
+        invoice_year=$unc_year
+        invoice_month=$unc_month
+      fi
       process_unc_pdf "$source_path" "$invoice_year" "$invoice_month" "$file_mtime" "$file_size" "$sha" "$is_meta" "$text_file"
       return 0
     fi
@@ -1298,11 +1983,31 @@ rescan_classified_file() {
   file_size=$(file_size_of "$source_path")
   sha=$(sha256_file "$source_path")
   text_file="${tmp_root}/rescan-$(basename "$source_path").txt"
-  extract_text_for_file "$source_path" "$text_file"
+  parsed=""
+  parse_source=""
+  text_extracted=0
+
+  cached=$(metadata_cache_get "$sha")
+  if [ -n "$cached" ]; then
+    cached_year=$(printf '%s' "$cached" | cut -f2)
+    cached_vendor=$(printf '%s' "$cached" | cut -f5)
+    if [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
+      parsed=$(printf '%s' "$cached" | cut -f1-10)
+      parse_source=$(printf '%s' "$cached" | cut -f11)
+      info "Invoice metadata cache hit during rescan: $source_path"
+      : >"$text_file"
+    fi
+  fi
+  if [ -z "$parsed" ]; then
+    extract_text_for_file "$source_path" "$text_file"
+    text_extracted=1
+  fi
 
   file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
-  text_upper=$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')
-  parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+  if [ -z "$parsed" ]; then
+    parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+    parse_source="pdf-text"
+  fi
   is_invoice=$(printf '%s' "$parsed" | cut -f1)
   invoice_year=$(printf '%s' "$parsed" | cut -f2)
   invoice_month=$(printf '%s' "$parsed" | cut -f3)
@@ -1313,7 +2018,27 @@ rescan_classified_file() {
   seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
   buyer_is_ivar=$(printf '%s' "$parsed" | cut -f10)
 
+  if [ -z "$vendor_name" ] && [ -n "$vendor_tax" ]; then
+    vendor_name=$(vendor_db_lookup_name "$vendor_tax")
+  fi
+
+  metadata_cache_put "$sha" "$is_invoice" "$invoice_year" "$invoice_month" "" "$vendor_name" "$vendor_tax" "$invoice_no" "$is_meta" "$seller_is_ivar" "$buyer_is_ivar" "$parse_source"
+
+  if [ "$is_invoice" != "1" ] && [ "$text_extracted" -eq 0 ]; then
+    extract_text_for_file "$source_path" "$text_file"
+    text_extracted=1
+  fi
+  text_upper=$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+
   if printf '%s\n%s\n' "$file_name_upper" "$text_upper" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+    unc_date=$(parse_unc_date_metadata "$text_file")
+    unc_year=$(printf '%s' "$unc_date" | cut -f1)
+    unc_month=$(printf '%s' "$unc_date" | cut -f2)
+    if [ -n "$unc_year" ] && [ -n "$unc_month" ]; then
+      invoice_year=$unc_year
+      invoice_month=$unc_month
+    fi
+
     if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
       inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/ngan hang/UNC")
       inferred_year=$(printf '%s' "$inferred" | cut -f1)
@@ -1365,6 +2090,7 @@ rescan_classified_file() {
     if [ "$old_source" != "$target" ]; then
       move_matching_invoice_xml "$old_source" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
     fi
+    vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$old_source" "$target"
     return 0
   fi
 
@@ -1527,6 +2253,7 @@ main() {
   info "Source year root: $CURRENT_YEAR_ROOT"
   info "Destination root: $IVAR_DATA"
   info "State DB: $DB_PATH"
+  info "Vendor DB: $VENDOR_DB_PATH"
   if [ "$DRY_RUN" -eq 1 ]; then
     info "Running in dry-run mode"
   fi
@@ -1539,10 +2266,21 @@ main() {
   if [ "$RESCAN_MODE" -eq 1 ]; then
     info "Running in rescan mode"
   fi
+  if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
+    info "Listing vendor reference DB"
+  fi
 
-  if [ ! -d "$IVAR_DATA" ]; then
+  if [ "$VENDOR_LIST_MODE" -ne 1 ] && [ ! -d "$IVAR_DATA" ]; then
     error "Destination folder not found: $IVAR_DATA"
     exit 1
+  fi
+
+  vendor_db_import_processed
+  metadata_cache_import_processed
+
+  if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
+    vendor_db_list
+    return 0
   fi
 
   if [ "$RESCAN_MODE" -eq 1 ]; then

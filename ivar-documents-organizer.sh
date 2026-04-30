@@ -373,12 +373,15 @@ has_vat_title = (
     "HOA DON GIA TRI GIA TANG" in norm
     or "HOA DON GTGT" in norm
     or "VAT INVOICE" in norm
+    or re.search(r"HOA\s+DON\s+GIA\s+TRI\s+GIA\s+TANG", norm) is not None
+    or re.search(r"HOA\s+DON.{0,240}GIA\s+TRI\s+GIA\s+TANG", norm, re.S) is not None
 )
 has_invoice_markers = (
     ("MA CQT" in norm or "MA CQT (CODE)" in norm)
     or "KY HIEU" in norm
     or "SO (NO.)" in norm
     or "SO (INVOICE NO.)" in norm
+    or re.search(r"\bSO\s*\((?:NO|INVOICE\s*NO)\.?\)\.?\s*:\s*\d", norm) is not None
     or re.search(r"\bSO\s*:\s*\d", norm) is not None
 )
 is_invoice = 1 if (has_vat_title and has_invoice_markers) else 0
@@ -438,13 +441,22 @@ for pattern in seller_patterns:
         break
 
 if not vendor_name:
+    header_text = norm
+    header_match = re.search(r"(.+?)(HOA\s+DON.{0,240}GIA\s+TRI\s+GIA\s+TANG|HOA\s+DON\s+GTGT|VAT\s+INVOICE)", norm, re.S)
+    if header_match:
+        header_text = header_match.group(1)
+    company_matches = re.findall(r"\bCONG\s+TY[^\n]+", header_text)
+    if company_matches:
+        vendor_name = normalize_spaces(company_matches[-1])
+
+if not vendor_name:
     top_lines = []
     for line in lines:
         if not line:
             continue
         if "MA SO THUE" in line or "TAX CODE" in line:
             break
-        if "HOA DON GIA TRI GIA TANG" in line or "HOA DON GTGT" in line or "VAT INVOICE" in line:
+        if re.search(r"HOA\s+DON\s+GIA\s+TRI\s+GIA\s+TANG", line) or "HOA DON GTGT" in line or "VAT INVOICE" in line:
             break
         top_lines.append(line)
     if top_lines:
@@ -536,6 +548,8 @@ invoice_no_patterns = [
     r"\bSO\s*:\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*\(INVOICE\s*NO\.?\)\s*:\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*\(NO\.?\)\s*:\s*([A-Z0-9\-_./]+)",
+    r"\bSO\s*\(INVOICE\s*NO\.?\)\.?\s*:\s*([A-Z0-9\-_./]+)",
+    r"\bSO\s*\(NO\.?\)\.?\s*:\s*([A-Z0-9\-_./]+)",
 ]
 for pattern in invoice_no_patterns:
     match = re.search(pattern, norm)

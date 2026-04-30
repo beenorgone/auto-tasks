@@ -24,14 +24,16 @@ DRY_RUN=0
 QUIET=0
 DEEP_MODE=0
 NO_SYNC=0
+RESCAN_MODE=0
 
 usage() {
   cat <<'EOF'
-Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--no-sync] [--quiet]
+Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--no-sync] [--quiet]
 
 Options:
   --dry-run   Print planned actions without moving/copying files or writing DB.
   --deep      Force month-end rollover logic as if today were the first day of next month.
+  --rescan    Re-read classified destination folders and restructure/rename files.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
@@ -45,6 +47,9 @@ while [ $# -gt 0 ]; do
       ;;
     --deep)
       DEEP_MODE=1
+      ;;
+    --rescan)
+      RESCAN_MODE=1
       ;;
     --no-sync)
       NO_SYNC=1
@@ -364,11 +369,16 @@ norm = normalize_ascii_text(text).upper()
 filename = os.path.basename(file_path)
 filename_norm = normalize_ascii(filename).upper()
 
-has_vat_title = "HOA DON GIA TRI GIA TANG" in norm or "VAT INVOICE" in norm
+has_vat_title = (
+    "HOA DON GIA TRI GIA TANG" in norm
+    or "HOA DON GTGT" in norm
+    or "VAT INVOICE" in norm
+)
 has_invoice_markers = (
     ("MA CQT" in norm or "MA CQT (CODE)" in norm)
     or "KY HIEU" in norm
     or "SO (NO.)" in norm
+    or "SO (INVOICE NO.)" in norm
     or re.search(r"\bSO\s*:\s*\d", norm) is not None
 )
 is_invoice = 1 if (has_vat_title and has_invoice_markers) else 0
@@ -417,6 +427,8 @@ if has_vat_title and buyer_is_ivar:
 
 seller_patterns = [
     r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
+    r"DON VI BAN HANG\s*\(COMPANY'?S NAME\)\s*:\s*([^\n]+)",
+    r"DON VI BAN HANG\s*:\s*([^\n]+)",
     r"NGUOI BAN\s*:\s*([^\n]+)",
 ]
 for pattern in seller_patterns:
@@ -432,7 +444,7 @@ if not vendor_name:
             continue
         if "MA SO THUE" in line or "TAX CODE" in line:
             break
-        if "HOA DON GIA TRI GIA TANG" in line or "VAT INVOICE" in line:
+        if "HOA DON GIA TRI GIA TANG" in line or "HOA DON GTGT" in line or "VAT INVOICE" in line:
             break
         top_lines.append(line)
     if top_lines:
@@ -509,10 +521,20 @@ for pattern in date_patterns:
         invoice_day, invoice_month, invoice_year = groups
     break
 
+if invoice_year and (
+    not re.fullmatch(r"20\d{2}", invoice_year)
+    or not invoice_month.isdigit()
+    or not 1 <= int(invoice_month) <= 12
+):
+    invoice_year = ""
+    invoice_month = ""
+    invoice_day = ""
+
 invoice_no_patterns = [
     r"INVOICE #\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*\n+\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*([A-Z0-9\-_./]+)",
+    r"\bSO\s*\(INVOICE\s*NO\.?\)\s*:\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*\(NO\.?\)\s*:\s*([A-Z0-9\-_./]+)",
 ]
 for pattern in invoice_no_patterns:
@@ -523,12 +545,18 @@ for pattern in invoice_no_patterns:
 
 if is_meta:
     if not vendor_name:
-        vendor_name = "Meta Platforms Ireland"
+        vendor_name = "Meta"
     if not vendor_tax:
         vendor_tax = "9000000327"
 
+if vendor_tax == "9000000327":
+    vendor_name = "Meta"
+
 if "IVAR VIET NAM" in vendor_name or vendor_tax == "0109555754":
     seller_is_ivar = 1
+
+if has_vat_title and vendor_name and not seller_is_ivar:
+    is_invoice = 1
 
 if not invoice_no:
     file_no = re.search(r"(FBADS[-_A-Z0-9]+)", filename_norm)
@@ -646,6 +674,238 @@ build_invoice_filename() {
   fi
 }
 
+build_unc_filename() {
+  text_path=$1
+  original_path=$2
+  require_command python3
+  python3 - "$text_path" "$original_path" <<'PY'
+import os
+import re
+import sys
+import unicodedata
+
+text_path = sys.argv[1]
+original_path = sys.argv[2]
+
+try:
+    with open(text_path, "r", encoding="utf-8", errors="ignore") as handle:
+        text = handle.read()
+except OSError:
+    text = ""
+
+base = os.path.basename(original_path)
+stem, ext = os.path.splitext(base)
+
+def normalize_spaces(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+def strip_accents(value: str) -> str:
+    value = value.replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    return value.encode("ascii", "ignore").decode("ascii")
+
+def safe_filename_part(value: str, limit: int = 120) -> str:
+    value = normalize_spaces(value)
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", value)
+    value = re.sub(r"\s*-\s*", "-", value)
+    value = re.sub(r"-{2,}", "-", value)
+    value = value.strip(" .-_")
+    if len(value) > limit:
+        value = value[:limit].rstrip(" .-_")
+    return value
+
+def line_norm(value: str) -> str:
+    return strip_accents(normalize_spaces(value)).upper()
+
+lines = [normalize_spaces(line) for line in text.splitlines()]
+norm_text = strip_accents(text)
+
+unc_no = ""
+no_patterns = [
+    r"\bSo\s*No\s*:\s*([A-Z0-9][A-Z0-9._/-]*)",
+    r"\bNo\s*:\s*([A-Z0-9][A-Z0-9._/-]*)",
+]
+for pattern in no_patterns:
+    match = re.search(pattern, norm_text, re.I)
+    if match:
+        unc_no = match.group(1)
+        break
+
+remark = ""
+stop_markers = (
+    "NGAY CAP",
+    "NOI CAP",
+    "DATE OF ISSUE",
+    "PLACE OF ISSUE",
+    "KE TOAN",
+    "GIAO DICH VIEN",
+    "KIEM SOAT",
+    "CHU TAI KHOAN",
+    "ACCOUNT HOLDER",
+    "CUSTOMER'S COPY",
+    "BANK'S COPY",
+)
+
+for idx, line in enumerate(lines):
+    normalized = line_norm(line)
+    if "REMARK" not in normalized and "NOI DUNG" not in normalized:
+        continue
+
+    candidate = re.sub(
+        r"(?i)\b(nội\s*dung|noi\s*dung|remarks?)\b\s*(?:/+\s*(?:remarks?|nội\s*dung|noi\s*dung))?\s*:?",
+        "",
+        line,
+    )
+    candidate = normalize_spaces(candidate)
+    if not candidate:
+        collected = []
+        for follow in lines[idx + 1 : idx + 5]:
+            follow_norm = line_norm(follow)
+            if any(marker in follow_norm for marker in stop_markers):
+                break
+            if follow:
+                collected.append(follow)
+        candidate = normalize_spaces(" ".join(collected))
+    if candidate:
+        remark = candidate
+        break
+
+parts = ["UNC"]
+safe_no = safe_filename_part(unc_no, 60)
+safe_remark = safe_filename_part(remark)
+if safe_no:
+    parts.append(safe_no)
+if safe_remark:
+    parts.append(safe_remark)
+
+if len(parts) == 1:
+    print(base)
+else:
+    print(" ".join(parts) + ext.lower())
+PY
+}
+
+unique_target_for_move() {
+  source_path=$1
+  target=$2
+  sha=$3
+
+  if [ "$source_path" = "$target" ]; then
+    printf '%s\n' "$target"
+    return 0
+  fi
+
+  if [ -e "$target" ]; then
+    base=$(basename "$target")
+    dir=$(dirname "$target")
+    stem=${base%.*}
+    ext=${base##*.}
+    if [ "$stem" = "$ext" ]; then
+      ext=""
+    else
+      ext=".${ext}"
+    fi
+    target="${dir}/${stem}_${sha}${ext}"
+  fi
+
+  printf '%s\n' "$target"
+}
+
+move_rescanned_file() {
+  source_path=$1
+  target=$2
+  label=$3
+
+  if [ "$source_path" = "$target" ]; then
+    info "Rescan kept ${label}: $source_path"
+    return 0
+  fi
+
+  ensure_dir "$(dirname "$target")"
+  run_cmd mv "$source_path" "$target"
+  info "Rescan moved ${label} -> $target"
+}
+
+infer_year_month_from_path() {
+  file_path=$1
+  root_path=$2
+  require_command python3
+  python3 - "$file_path" "$root_path" <<'PY'
+import os
+import re
+import sys
+
+file_path = os.path.abspath(sys.argv[1])
+root_path = os.path.abspath(sys.argv[2])
+
+try:
+    rel = os.path.relpath(file_path, root_path)
+except ValueError:
+    print("\t")
+    raise SystemExit
+
+parts = rel.split(os.sep)
+for idx in range(0, len(parts) - 1):
+    if re.fullmatch(r"\d{4}", parts[idx]) and re.fullmatch(r"\d{2}", parts[idx + 1]):
+        print(parts[idx] + "\t" + parts[idx + 1])
+        break
+else:
+    print("\t")
+PY
+}
+
+infer_year_from_path() {
+  file_path=$1
+  root_path=$2
+  require_command python3
+  python3 - "$file_path" "$root_path" <<'PY'
+import os
+import re
+import sys
+
+file_path = os.path.abspath(sys.argv[1])
+root_path = os.path.abspath(sys.argv[2])
+
+try:
+    rel = os.path.relpath(file_path, root_path)
+except ValueError:
+    print("")
+    raise SystemExit
+
+for part in rel.split(os.sep):
+    if re.fullmatch(r"\d{4}", part):
+        print(part)
+        break
+else:
+    print("")
+PY
+}
+
+invoice_dest_dir_for_metadata() {
+  invoice_year=$1
+  invoice_month=$2
+  vendor_name=$3
+  vendor_tax=$4
+
+  vendor_folder=$vendor_name
+  if [ -n "$vendor_folder" ] && [ -n "$vendor_tax" ]; then
+    vendor_folder="${vendor_folder} ${vendor_tax}"
+  fi
+  vendor_folder=$(printf '%s' "$vendor_folder" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
+  vendor_folder=$(printf '%s' "$vendor_folder" | sed 's/[[:space:]]KY HIEU.*$//; s/[[:space:]]SERIAL.*$//; s/[[:space:]]SO (NO.*$//; s/[[:space:]]DIA CHI.*$//; s/[[:space:]]ADDRESS.*$//; s/[[:space:]]\+/ /g; s/^ //; s/ $//')
+  if [ "$(printf '%s' "$vendor_folder" | wc -c | tr -d ' ')" -gt 140 ]; then
+    vendor_folder=""
+  fi
+
+  if [ -n "$invoice_year" ] && [ -n "$invoice_month" ] && [ -n "$vendor_folder" ]; then
+    printf '%s\n' "${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}/${vendor_folder}"
+  elif [ -n "$invoice_year" ] && [ -n "$invoice_month" ]; then
+    printf '%s\n' "${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}"
+  else
+    printf '%s\n' "${IVAR_DATA}/hoa don dau vao"
+  fi
+}
+
 move_matching_invoice_xml() {
   pdf_source=$1
   dest_dir=$2
@@ -723,6 +983,7 @@ process_unc_pdf() {
   file_size=$5
   sha=$6
   is_meta=$7
+  text_file=$8
   if [ -z "$invoice_year" ]; then
     invoice_year=$CURRENT_YEAR
   fi
@@ -739,7 +1000,18 @@ process_unc_pdf() {
   else
     note="unc"
   fi
-  target="${move_dir}/$(basename "$source_path")"
+  dest_name=$(build_unc_filename "$text_file" "$source_path")
+  target="${move_dir}/${dest_name}"
+  if [ -e "$target" ]; then
+    stem=${dest_name%.*}
+    ext=${dest_name##*.}
+    if [ "$stem" = "$ext" ]; then
+      ext=""
+    else
+      ext=".${ext}"
+    fi
+    target="${move_dir}/${stem}_${sha}${ext}"
+  fi
   run_cmd mv "$source_path" "$target"
   info "Processed UNC file -> $target"
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "unc" "$invoice_year" "$invoice_month" "" "" "" "$note"
@@ -794,19 +1066,7 @@ process_invoice_pdf() {
   file_size=$9
   sha=${10}
 
-  vendor_folder=$vendor_name
-  if [ -n "$vendor_folder" ] && [ -n "$vendor_tax" ]; then
-    vendor_folder="${vendor_folder} ${vendor_tax}"
-  fi
-  vendor_folder=$(printf '%s' "$vendor_folder" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
-
-  if [ -n "$invoice_year" ] && [ -n "$invoice_month" ] && [ -n "$vendor_folder" ]; then
-    dest_dir="${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}/${vendor_folder}"
-  elif [ -n "$invoice_year" ] && [ -n "$invoice_month" ]; then
-    dest_dir="${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}"
-  else
-    dest_dir="${IVAR_DATA}/hoa don dau vao"
-  fi
+  dest_dir=$(invoice_dest_dir_for_metadata "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax")
   ensure_dir "$dest_dir"
 
   if [ "$is_meta" = "1" ]; then
@@ -933,7 +1193,7 @@ process_source_file() {
 
   if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
     if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
-      process_unc_pdf "$source_path" "$invoice_year" "$invoice_month" "$file_mtime" "$file_size" "$sha" "$is_meta"
+      process_unc_pdf "$source_path" "$invoice_year" "$invoice_month" "$file_mtime" "$file_size" "$sha" "$is_meta" "$text_file"
       return 0
     fi
 
@@ -1002,6 +1262,206 @@ scan_current_month() {
   trap - EXIT INT TERM
 }
 
+rescan_classified_file() {
+  source_path=$1
+  tmp_root=$2
+
+  if [ ! -f "$source_path" ]; then
+    info "Rescan skipping missing file: $source_path"
+    return 0
+  fi
+
+  file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+  case "$file_lower" in
+    *.pdf)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  file_mtime=$(file_mtime_of "$source_path")
+  file_size=$(file_size_of "$source_path")
+  sha=$(sha256_file "$source_path")
+  text_file="${tmp_root}/rescan-$(basename "$source_path").txt"
+  extract_text_for_file "$source_path" "$text_file"
+
+  file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
+  text_upper=$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+  parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+  is_invoice=$(printf '%s' "$parsed" | cut -f1)
+  invoice_year=$(printf '%s' "$parsed" | cut -f2)
+  invoice_month=$(printf '%s' "$parsed" | cut -f3)
+  vendor_name=$(printf '%s' "$parsed" | cut -f5)
+  vendor_tax=$(printf '%s' "$parsed" | cut -f6)
+  invoice_no=$(printf '%s' "$parsed" | cut -f7)
+  is_meta=$(printf '%s' "$parsed" | cut -f8)
+  seller_is_ivar=$(printf '%s' "$parsed" | cut -f9)
+  buyer_is_ivar=$(printf '%s' "$parsed" | cut -f10)
+
+  if printf '%s\n%s\n' "$file_name_upper" "$text_upper" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+    if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
+      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/ngan hang/UNC")
+      inferred_year=$(printf '%s' "$inferred" | cut -f1)
+      inferred_month=$(printf '%s' "$inferred" | cut -f2)
+      if [ -z "$invoice_year" ]; then
+        invoice_year=$inferred_year
+      fi
+      if [ -z "$invoice_month" ]; then
+        invoice_month=$inferred_month
+      fi
+    fi
+    if [ -z "$invoice_year" ]; then
+      invoice_year=$CURRENT_YEAR
+    fi
+    if [ -z "$invoice_month" ]; then
+      invoice_month=$CURRENT_MONTH
+    fi
+
+    dest_dir="${IVAR_DATA}/ngan hang/UNC/${invoice_year}/${invoice_month}"
+    dest_name=$(build_unc_filename "$text_file" "$source_path")
+    target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
+    move_rescanned_file "$source_path" "$target" "UNC"
+    return 0
+  fi
+
+  if [ "$is_invoice" = "1" ]; then
+    if [ "$seller_is_ivar" = "1" ] && [ "$buyer_is_ivar" != "1" ] && [ "$is_meta" != "1" ]; then
+      info "Rescan skipping outgoing IVAR invoice: $source_path"
+      return 0
+    fi
+
+    if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
+      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/hoa don dau vao")
+      inferred_year=$(printf '%s' "$inferred" | cut -f1)
+      inferred_month=$(printf '%s' "$inferred" | cut -f2)
+      if [ -z "$invoice_year" ]; then
+        invoice_year=$inferred_year
+      fi
+      if [ -z "$invoice_month" ]; then
+        invoice_month=$inferred_month
+      fi
+    fi
+
+    dest_dir=$(invoice_dest_dir_for_metadata "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax")
+    dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
+    target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
+    old_source=$source_path
+    move_rescanned_file "$source_path" "$target" "invoice"
+    if [ "$old_source" != "$target" ]; then
+      move_matching_invoice_xml "$old_source" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
+    fi
+    return 0
+  fi
+
+  info "Rescan found no matching classified rule: $source_path"
+}
+
+rescan_facebook_file() {
+  source_path=$1
+  tmp_root=$2
+  facebook_kind=$3
+
+  if [ ! -f "$source_path" ]; then
+    info "Facebook rescan skipping missing file: $source_path"
+    return 0
+  fi
+
+  file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+  case "$file_lower" in
+    *.pdf)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  sha=$(sha256_file "$source_path")
+  text_file="${tmp_root}/facebook-$(basename "$source_path").txt"
+  extract_text_for_file "$source_path" "$text_file"
+  parsed=$(parse_invoice_metadata "$text_file" "$source_path")
+  invoice_year=$(printf '%s' "$parsed" | cut -f2)
+  vendor_tax=$(printf '%s' "$parsed" | cut -f6)
+  invoice_no=$(printf '%s' "$parsed" | cut -f7)
+  inferred_year=$(infer_year_from_path "$source_path" "${IVAR_DATA}/chi phi Facebook")
+
+  if [ -z "$invoice_year" ]; then
+    invoice_year=$inferred_year
+  fi
+  if [ -z "$invoice_year" ]; then
+    invoice_year=$CURRENT_YEAR
+  fi
+
+  case "$facebook_kind" in
+    unc)
+      dest_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+      dest_name=$(build_unc_filename "$text_file" "$source_path")
+      target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
+      move_rescanned_file "$source_path" "$target" "Facebook UNC"
+      ;;
+    invoice)
+      dest_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/hoa don"
+      dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
+      target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
+      move_rescanned_file "$source_path" "$target" "Facebook invoice"
+      ;;
+  esac
+}
+
+rescan_classified_dirs() {
+  tmp_root=$(tmp_dir_make)
+  trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
+
+  invoice_root="${IVAR_DATA}/hoa don dau vao"
+  unc_root="${IVAR_DATA}/ngan hang/UNC"
+  facebook_root="${IVAR_DATA}/chi phi Facebook"
+
+  if [ -d "$invoice_root" ]; then
+    info "Rescanning classified invoices: $invoice_root"
+    find "$invoice_root" -type f ! -name '.*' | while IFS= read -r source_path; do
+      source_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+      case "$source_lower" in
+        */xnk/*)
+          info "Rescan skipping XNK document under invoice root: $source_path"
+          continue
+          ;;
+      esac
+      rescan_classified_file "$source_path" "$tmp_root"
+    done
+  else
+    warn "Invoice destination folder not found: $invoice_root"
+  fi
+
+  if [ -d "$unc_root" ]; then
+    info "Rescanning classified UNC files: $unc_root"
+    find "$unc_root" -type f ! -name '.*' | while IFS= read -r source_path; do
+      rescan_classified_file "$source_path" "$tmp_root"
+    done
+  else
+    warn "UNC destination folder not found: $unc_root"
+  fi
+
+  if [ -d "$facebook_root" ]; then
+    info "Rescanning Facebook expense files: $facebook_root"
+    find "$facebook_root" -type f ! -name '.*' | while IFS= read -r source_path; do
+      source_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+      case "$source_lower" in
+        */unc/*)
+          rescan_facebook_file "$source_path" "$tmp_root" "unc"
+          ;;
+        */hoa\ don/*)
+          rescan_facebook_file "$source_path" "$tmp_root" "invoice"
+          ;;
+      esac
+    done
+  else
+    warn "Facebook expense destination folder not found: $facebook_root"
+  fi
+
+  cleanup_dir "$tmp_root"
+  trap - EXIT INT TERM
+}
+
 run_rup_prj() {
   if [ "$NO_SYNC" -eq 1 ]; then
     info "Skipping rclone project sync because --no-sync was provided."
@@ -1062,14 +1522,21 @@ main() {
   if [ "$NO_SYNC" -eq 1 ]; then
     info "Running with rclone sync disabled"
   fi
+  if [ "$RESCAN_MODE" -eq 1 ]; then
+    info "Running in rescan mode"
+  fi
 
   if [ ! -d "$IVAR_DATA" ]; then
     error "Destination folder not found: $IVAR_DATA"
     exit 1
   fi
 
-  maybe_rollover_previous_month
-  scan_current_month
+  if [ "$RESCAN_MODE" -eq 1 ]; then
+    rescan_classified_dirs
+  else
+    maybe_rollover_previous_month
+    scan_current_month
+  fi
 
   info "Sync completed."
   run_rup_prj

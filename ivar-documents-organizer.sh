@@ -26,16 +26,19 @@ QUIET=0
 DEEP_MODE=0
 NO_SYNC=0
 RESCAN_MODE=0
+RESCAN_UNC_MODE=0
 VENDOR_LIST_MODE=0
 
 usage() {
   cat <<'EOF'
-Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--vendors] [--no-sync] [--quiet]
+Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--rescan-unc] [--vendors] [--no-sync] [--quiet]
 
 Options:
   --dry-run   Print planned actions without moving/copying files or writing DB.
   --deep      Force month-end rollover logic as if today were the first day of next month.
   --rescan    Re-read classified destination folders and restructure/rename files.
+  --rescan-unc
+              Re-read only the classified bank UNC folder.
   --vendors   Print known vendor MST/name reference from the local vendor DB.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
@@ -53,6 +56,9 @@ while [ $# -gt 0 ]; do
       ;;
     --rescan)
       RESCAN_MODE=1
+      ;;
+    --rescan-unc)
+      RESCAN_UNC_MODE=1
       ;;
     --vendors)
       VENDOR_LIST_MODE=1
@@ -1623,14 +1629,6 @@ process_unc_pdf() {
   fi
   move_dir="${IVAR_DATA}/ngan hang/UNC/${invoice_year}/${invoice_month}"
   ensure_dir "$move_dir"
-  if [ "$is_meta" = "1" ]; then
-    copy_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
-    ensure_dir "$copy_dir"
-    copy_if_needed "$source_path" "$copy_dir"
-    note="facebook-unc"
-  else
-    note="unc"
-  fi
   dest_name=$(build_unc_filename "$text_file" "$source_path")
   target="${move_dir}/${dest_name}"
   if [ -e "$target" ]; then
@@ -1643,6 +1641,17 @@ process_unc_pdf() {
     fi
     target="${move_dir}/${stem}_${sha}${ext}"
   fi
+
+  final_dest_name=$(basename "$target")
+  if [ "$is_meta" = "1" ]; then
+    copy_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+    ensure_dir "$copy_dir"
+    run_cmd cp "$source_path" "${copy_dir}/${final_dest_name}"
+    note="facebook-unc"
+  else
+    note="unc"
+  fi
+
   run_cmd mv "$source_path" "$target"
   info "Processed UNC file -> $target"
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "unc" "$invoice_year" "$invoice_month" "" "" "" "$note"
@@ -1699,14 +1708,6 @@ process_invoice_pdf() {
 
   dest_dir=$(invoice_dest_dir_for_metadata "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax")
   ensure_dir "$dest_dir"
-
-  if [ "$is_meta" = "1" ]; then
-    if [ -n "$invoice_year" ]; then
-      copy_if_needed "$source_path" "${IVAR_DATA}/chi phi Facebook/${invoice_year}/hoa don"
-    else
-      copy_if_needed "$source_path" "${IVAR_DATA}/chi phi Facebook/hoa don"
-    fi
-  fi
 
   dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
   target="${dest_dir}/${dest_name}"
@@ -1874,7 +1875,7 @@ process_source_file() {
 
   if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
     needs_text_for_unc=0
-    if printf '%s\n' "$file_name_upper" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+    if printf '%s\n' "$file_name_upper" | grep -Eqi '(^|[^a-zA-Z])unc([^a-zA-Z]|$)|uy nhiem chi|ủy nhiệm chi'; then
       needs_text_for_unc=1
     elif [ "$is_invoice" != "1" ] && [ "$text_extracted" -eq 0 ]; then
       needs_text_for_unc=1
@@ -1884,7 +1885,7 @@ process_source_file() {
       text_extracted=1
     fi
 
-    if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+    if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null)" | grep -Eqi '(^|[^a-zA-Z])unc([^a-zA-Z]|$)|uy nhiem chi|ủy nhiệm chi'; then
       unc_date=$(parse_unc_date_metadata "$text_file")
       unc_year=$(printf '%s' "$unc_date" | cut -f1)
       unc_month=$(printf '%s' "$unc_date" | cut -f2)
@@ -2028,9 +2029,15 @@ rescan_classified_file() {
     extract_text_for_file "$source_path" "$text_file"
     text_extracted=1
   fi
-  text_upper=$(cat "$text_file" 2>/dev/null | tr '[:lower:]' '[:upper:]')
 
-  if printf '%s\n%s\n' "$file_name_upper" "$text_upper" | grep -Eq '(^|[^A-Z])UNC([^A-Z]|$)|UY NHIEM CHI'; then
+  is_unc=0
+  if printf '%s\n%s\n' "$file_name_upper" "$(cat "$text_file" 2>/dev/null)" | grep -Eqi '(^|[^a-zA-Z])unc([^a-zA-Z]|$)|uy nhiem chi|ủy nhiệm chi'; then
+    is_unc=1
+  elif printf '%s' "$file_lower" | grep -Eq '/ngan hang/unc/|/chi phi facebook/.*/unc/'; then
+    is_unc=1
+  fi
+
+  if [ "$is_unc" -eq 1 ]; then
     unc_date=$(parse_unc_date_metadata "$text_file")
     unc_year=$(printf '%s' "$unc_date" | cut -f1)
     unc_month=$(printf '%s' "$unc_date" | cut -f2)
@@ -2202,6 +2209,37 @@ rescan_classified_dirs() {
   trap - EXIT INT TERM
 }
 
+rescan_unc_dir() {
+  tmp_root=$(tmp_dir_make)
+  trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
+
+  unc_root="${IVAR_DATA}/ngan hang/UNC"
+  if [ -d "$unc_root" ]; then
+    info "Rescanning classified UNC files only: $unc_root"
+    find "$unc_root" -type f ! -name '.*' | while IFS= read -r source_path; do
+      rescan_classified_file "$source_path" "$tmp_root"
+    done
+  else
+    warn "UNC destination folder not found: $unc_root"
+  fi
+
+  fb_root="${IVAR_DATA}/chi phi Facebook"
+  if [ -d "$fb_root" ]; then
+    info "Rescanning Facebook UNC files..."
+    find "$fb_root" -type f ! -name '.*' | while IFS= read -r source_path; do
+      source_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+      case "$source_lower" in
+        */unc/*)
+          rescan_facebook_file "$source_path" "$tmp_root" "unc"
+          ;;
+      esac
+    done
+  fi
+
+  cleanup_dir "$tmp_root"
+  trap - EXIT INT TERM
+}
+
 run_rup_prj() {
   if [ "$NO_SYNC" -eq 1 ]; then
     info "Skipping rclone project sync because --no-sync was provided."
@@ -2266,6 +2304,9 @@ main() {
   if [ "$RESCAN_MODE" -eq 1 ]; then
     info "Running in rescan mode"
   fi
+  if [ "$RESCAN_UNC_MODE" -eq 1 ]; then
+    info "Running in UNC-only rescan mode"
+  fi
   if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
     info "Listing vendor reference DB"
   fi
@@ -2283,7 +2324,9 @@ main() {
     return 0
   fi
 
-  if [ "$RESCAN_MODE" -eq 1 ]; then
+  if [ "$RESCAN_UNC_MODE" -eq 1 ]; then
+    rescan_unc_dir
+  elif [ "$RESCAN_MODE" -eq 1 ]; then
     rescan_classified_dirs
   else
     maybe_rollover_previous_month

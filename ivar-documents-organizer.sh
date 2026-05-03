@@ -27,11 +27,12 @@ DEEP_MODE=0
 NO_SYNC=0
 RESCAN_MODE=0
 RESCAN_UNC_MODE=0
+NO_DUPLICATES=0
 VENDOR_LIST_MODE=0
 
 usage() {
   cat <<'EOF'
-Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--rescan-unc] [--vendors] [--no-sync] [--quiet]
+Usage: sh ivar-documents-organizer.sh [--dry-run] [--deep] [--rescan] [--rescan-unc] [--no-duplicates] [--vendors] [--no-sync] [--quiet]
 
 Options:
   --dry-run   Print planned actions without moving/copying files or writing DB.
@@ -39,6 +40,8 @@ Options:
   --rescan    Re-read classified destination folders and restructure/rename files.
   --rescan-unc
               Re-read only the classified bank UNC folder.
+  --no-duplicates
+              During rescan, remove same-content duplicate files instead of keeping _sha copies.
   --vendors   Print known vendor MST/name reference from the local vendor DB.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
@@ -59,6 +62,9 @@ while [ $# -gt 0 ]; do
       ;;
     --rescan-unc)
       RESCAN_UNC_MODE=1
+      ;;
+    --no-duplicates)
+      NO_DUPLICATES=1
       ;;
     --vendors)
       VENDOR_LIST_MODE=1
@@ -1007,7 +1013,33 @@ date_patterns = [
     r"(\d{2})/(\d{2})/(\d{4})",
     r"(\d{4})-(\d{2})-(\d{2})",
 ]
+if is_meta:
+    month_names = {
+        "JANUARY": "01", "JAN": "01",
+        "FEBRUARY": "02", "FEB": "02",
+        "MARCH": "03", "MAR": "03",
+        "APRIL": "04", "APR": "04",
+        "MAY": "05",
+        "JUNE": "06", "JUN": "06",
+        "JULY": "07", "JUL": "07",
+        "AUGUST": "08", "AUG": "08",
+        "SEPTEMBER": "09", "SEPT": "09", "SEP": "09",
+        "OCTOBER": "10", "OCT": "10",
+        "NOVEMBER": "11", "NOV": "11",
+        "DECEMBER": "12", "DEC": "12",
+    }
+    payment_date_match = re.search(
+        r"INVOICE\s*/\s*PAYMENT\s+DATE\s+([A-Z]+)\s+(\d{1,2}),\s*(\d{4})(?:,\s*\d{1,2}:\d{2}\s*(?:AM|PM)?)?",
+        norm,
+        re.I,
+    )
+    if payment_date_match:
+        month_name, invoice_day, invoice_year = payment_date_match.groups()
+        invoice_month = month_names.get(month_name.upper(), "")
+
 for pattern in date_patterns:
+    if invoice_year and invoice_month:
+        break
     match = re.search(pattern, norm)
     if not match:
         continue
@@ -1432,6 +1464,14 @@ unique_target_for_move() {
   fi
 
   if [ -e "$target" ]; then
+    if [ "$NO_DUPLICATES" -eq 1 ]; then
+      target_sha=$(sha256_file "$target")
+      if [ "$target_sha" = "$sha" ]; then
+        printf '__DUPLICATE_SAME__%s\n' "$target"
+        return 0
+      fi
+    fi
+
     base=$(basename "$target")
     dir=$(dirname "$target")
     stem=${base%.*}
@@ -1451,6 +1491,19 @@ move_rescanned_file() {
   source_path=$1
   target=$2
   label=$3
+
+  case "$target" in
+    __DUPLICATE_SAME__*)
+      existing_target=${target#__DUPLICATE_SAME__}
+      if [ "$source_path" = "$existing_target" ]; then
+        info "Rescan kept ${label}: $source_path"
+        return 0
+      fi
+      run_cmd rm -f "$source_path"
+      info "Rescan removed duplicate ${label}: $source_path (same as $existing_target)"
+      return 0
+      ;;
+  esac
 
   if [ "$source_path" = "$target" ]; then
     info "Rescan kept ${label}: $source_path"
@@ -2306,6 +2359,9 @@ main() {
   fi
   if [ "$RESCAN_UNC_MODE" -eq 1 ]; then
     info "Running in UNC-only rescan mode"
+  fi
+  if [ "$NO_DUPLICATES" -eq 1 ]; then
+    info "Running with duplicate removal enabled for rescan moves"
   fi
   if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
     info "Listing vendor reference DB"

@@ -15,6 +15,7 @@ STATE_DIR="${STATE_DIR:-${DOCS_ROOT}/.auto-tasks/ivar-documents-organizer}"
 LOG_DIR="${STATE_DIR}/logs"
 DB_PATH="${STATE_DIR}/processed.db"
 VENDOR_DB_PATH="${STATE_DIR}/vendors.db"
+LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-10}"
 CURRENT_DATE="${CURRENT_DATE:-$(date '+%Y-%m-%d')}"
 CURRENT_YEAR=$(printf '%s' "$CURRENT_DATE" | cut -d- -f1)
 CURRENT_MONTH=$(printf '%s' "$CURRENT_DATE" | cut -d- -f2)
@@ -112,6 +113,45 @@ warn() {
 
 error() {
   log_line ERROR "$@"
+}
+
+cleanup_old_logs() {
+  if [ ! -d "$LOG_DIR" ]; then
+    return 0
+  fi
+
+  require_command python3
+  python3 - "$LOG_DIR" "$CURRENT_DATE" "$LOG_RETENTION_DAYS" <<'PY' | while IFS= read -r old_log; do
+import datetime as dt
+import os
+import sys
+
+log_dir, current_date, retention_days = sys.argv[1:4]
+try:
+    today = dt.date.fromisoformat(current_date)
+    cutoff = today - dt.timedelta(days=max(int(retention_days), 0))
+except ValueError:
+    cutoff = dt.date.today() - dt.timedelta(days=10)
+
+try:
+    names = os.listdir(log_dir)
+except OSError:
+    names = []
+
+for name in names:
+    if not name.endswith(".log"):
+        continue
+    stem = name[:-4]
+    try:
+        log_date = dt.date.fromisoformat(stem)
+    except ValueError:
+        continue
+    if log_date <= cutoff:
+        print(os.path.join(log_dir, name))
+PY
+    run_cmd rm -f "$old_log"
+    info "Deleted log ${LOG_RETENTION_DAYS} days old or older: $old_log"
+  done
 }
 
 run_cmd() {
@@ -866,6 +906,16 @@ has_vat_title = (
     or "VAT INVOICE" in norm
     or re.search(r"HOA\s+DON\s+GIA\s+TRI\s+GIA\s+TANG", norm) is not None
     or re.search(r"HOA\s+DON.{0,240}GIA\s+TRI\s+GIA\s+TANG", norm, re.S) is not None
+    or re.search(r"HOA\s+DON.{0,120}\bGTGT\b", norm, re.S) is not None
+)
+has_bill_sale_title = (
+    "HOA DON BAN HANG" in norm
+    or "BILL OF SALE" in norm
+    or re.search(r"HOA\s+DON\s+BAN\s+HANG", norm) is not None
+)
+has_tax_fee_receipt_title = (
+    "BIEN LAI THU TIEN THUE, PHI, LE PHI" in norm
+    or re.search(r"BIEN\s+LAI\s+THU\s+TIEN\s+THUE,\s*PHI,\s*LE\s+PHI", norm) is not None
 )
 has_invoice_markers = (
     ("MA CQT" in norm or "MA CQT (CODE)" in norm)
@@ -875,7 +925,7 @@ has_invoice_markers = (
     or re.search(r"\bSO\s*\((?:NO|INVOICE\s*NO)\.?\)\.?\s*:\s*\d", norm) is not None
     or re.search(r"\bSO\s*:\s*\d", norm) is not None
 )
-is_invoice = 1 if (has_vat_title and has_invoice_markers) else 0
+is_invoice = 1 if ((has_vat_title or has_bill_sale_title or has_tax_fee_receipt_title) and has_invoice_markers) else 0
 
 is_meta = 0
 if (
@@ -898,7 +948,41 @@ invoice_day = ""
 buyer_is_ivar = 0
 seller_is_ivar = 0
 
-lines = [normalize_spaces(line) for line in norm.splitlines()]
+raw_lines = norm.splitlines()
+lines = [normalize_spaces(line) for line in raw_lines]
+
+if has_tax_fee_receipt_title:
+    issuer_lines = []
+    for raw_line in raw_lines:
+        line = normalize_spaces(raw_line)
+        if not line:
+            continue
+        if "MA SO THUE" in line or "BIEN LAI THU TIEN" in line:
+            break
+        line = re.split(r"\s{2,}(?:CONG HOA|VIET NAM|DOC LAP|MAU SO|KY HIEU|SO:)", raw_line, 1)[0]
+        line = normalize_spaces(line)
+        if not line:
+            continue
+        if (
+            "CONG HOA XA HOI CHU NGHIA" in line
+            or line == "VIET NAM"
+            or "DOC LAP - TU DO - HANH PHUC" in line
+            or line.startswith("MAU SO")
+            or line.startswith("KY HIEU")
+            or line.startswith("SO:")
+        ):
+            continue
+        issuer_lines.append(line)
+    if issuer_lines:
+        vendor_name = normalize_spaces(" ".join(issuer_lines))
+    receipt_tax = re.search(r"MA SO THUE\s*:\s*([0-9 ]{8,20})", norm)
+    if receipt_tax:
+        vendor_tax = re.sub(r"\D", "", receipt_tax.group(1))
+    receipt_no = re.search(r"\bSO\s*:\s*([0-9]{3,})\b", norm)
+    if not receipt_no:
+        receipt_no = re.search(r"(?m)^SO\s*:\s*(?:\n\s*)*([0-9]{3,})\b", norm)
+    if receipt_no:
+        invoice_no = receipt_no.group(1)
 
 buyer_section = ""
 buyer_match = re.search(
@@ -909,17 +993,22 @@ buyer_match = re.search(
 if buyer_match:
     buyer_section = buyer_match.group(2)
 else:
-    buyer_tax_match = re.search(r"(TEN DON VI\s*:.*?MA SO THUE\s*:\s*0109555754)", norm, re.S)
+    buyer_tax_match = re.search(
+        r"(TEN\s+(?:DON\s+VI|KHACH\s+HANG)\s*:.*?(?:MA\s+SO\s+THUE|MS\s+THUE\s+KH|MST\s+KH)\s*:\s*0109555754)",
+        norm,
+        re.S,
+    )
     if buyer_tax_match:
         buyer_section = buyer_tax_match.group(1)
 
 if "IVAR VIET NAM" in buyer_section or "0109555754" in re.sub(r"\D", "", buyer_section):
     buyer_is_ivar = 1
 
-if has_vat_title and buyer_is_ivar:
+if (has_vat_title or has_bill_sale_title or has_tax_fee_receipt_title) and buyer_is_ivar:
     is_invoice = 1
 
 seller_patterns = [
+    r"DON VI BAN HANG\s*\(COMPANY\)\s*:\s*([^\n]+)",
     r"DON VI BAN HANG\s*\(SELLER\)\s*:\s*([^\n]+)",
     r"DON VI BAN HANG\s*\(COMPANY'?S NAME\)\s*:\s*([^\n]+)",
     r"DON VI BAN HANG\s*:\s*([^\n]+)",
@@ -1061,6 +1150,7 @@ if invoice_year and (
     invoice_day = ""
 
 invoice_no_patterns = [
+    r"\bSO\s*\(NO\.?\)\s*:\s*(?:\([^)]+\)\s*)*([0-9]{1,})",
     r"INVOICE #\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*\n+\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*:\s*([A-Z0-9\-_./]+)",
@@ -1069,11 +1159,12 @@ invoice_no_patterns = [
     r"\bSO\s*\(INVOICE\s*NO\.?\)\.?\s*:\s*([A-Z0-9\-_./]+)",
     r"\bSO\s*\(NO\.?\)\.?\s*:\s*([A-Z0-9\-_./]+)",
 ]
-for pattern in invoice_no_patterns:
-    match = re.search(pattern, norm)
-    if match:
-        invoice_no = normalize_spaces(match.group(1))
-        break
+if not invoice_no:
+    for pattern in invoice_no_patterns:
+        match = re.search(pattern, norm)
+        if match:
+            invoice_no = normalize_spaces(match.group(1))
+            break
 
 if is_meta:
     if not vendor_name:
@@ -1087,7 +1178,7 @@ if vendor_tax == "9000000327":
 if "IVAR VIET NAM" in vendor_name or vendor_tax == "0109555754":
     seller_is_ivar = 1
 
-if has_vat_title and vendor_name and not seller_is_ivar:
+if (has_vat_title or has_bill_sale_title or has_tax_fee_receipt_title) and vendor_name and not seller_is_ivar:
     is_invoice = 1
 
 if not invoice_no:
@@ -1774,6 +1865,31 @@ process_invoice_pdf() {
   vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$source_path" "$target"
 }
 
+process_invoice_xml() {
+  source_path=$1
+  invoice_year=$2
+  invoice_month=$3
+  vendor_name=$4
+  vendor_tax=$5
+  invoice_no=$6
+  file_mtime=$7
+  file_size=$8
+  sha=$9
+
+  dest_dir=$(invoice_dest_dir_for_metadata "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax")
+  ensure_dir "$dest_dir"
+
+  dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
+  target="${dest_dir}/${dest_name}"
+  if [ -e "$target" ]; then
+    target="${dest_dir}/${sha}_$(basename "$target")"
+  fi
+  run_cmd mv "$source_path" "$target"
+  info "Processed invoice XML -> $target"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "invoice-xml" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" "standalone-xml"
+  vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$source_path" "$target"
+}
+
 maybe_rollover_previous_month() {
   if [ "$CURRENT_DAY" != "01" ] && [ "$DEEP_MODE" -ne 1 ]; then
     return 0
@@ -1863,11 +1979,21 @@ process_source_file() {
       ;;
   esac
   file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
+  force_pdf_reparse=0
+  case "$file_name_upper" in
+    *ATTP*|*EBL[0-9]*_*)
+      force_pdf_reparse=1
+      ;;
+  esac
   parsed=""
   parse_source=""
   text_extracted=0
 
-  if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
+  if printf '%s' "$file_lower" | grep -q '\.xml$'; then
+    parsed=$(parse_xml_invoice_metadata "$source_path" "$source_path")
+    parse_source="xml"
+    info "Invoice metadata parsed from standalone XML: $source_path"
+  elif printf '%s' "$file_lower" | grep -q '\.pdf$'; then
     source_dir=$(dirname "$source_path")
     base=$(basename "$source_path")
     stem=${base%.*}
@@ -1887,9 +2013,12 @@ process_source_file() {
     if [ -z "$parsed" ]; then
       cached=$(metadata_cache_get "$sha")
       if [ -n "$cached" ]; then
+        cached_is_invoice=$(printf '%s' "$cached" | cut -f1)
         cached_year=$(printf '%s' "$cached" | cut -f2)
         cached_vendor=$(printf '%s' "$cached" | cut -f5)
-        if [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
+        if [ "$force_pdf_reparse" -eq 1 ] && [ "$cached_is_invoice" != "1" ]; then
+          info "Ignoring stale non-invoice metadata cache for PDF: $source_path"
+        elif [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
           parsed=$(printf '%s' "$cached" | cut -f1-10)
           parse_source=$(printf '%s' "$cached" | cut -f11)
           info "Invoice metadata cache hit for PDF: $source_path"
@@ -1920,6 +2049,22 @@ process_source_file() {
 
   if [ -z "$vendor_name" ] && [ -n "$vendor_tax" ]; then
     vendor_name=$(vendor_db_lookup_name "$vendor_tax")
+  fi
+
+  if printf '%s' "$file_lower" | grep -q '\.xml$'; then
+    if [ "$is_invoice" = "1" ]; then
+      if [ "$seller_is_ivar" = "1" ] && [ "$buyer_is_ivar" != "1" ] && [ "$is_meta" != "1" ]; then
+        info "Skipping outgoing IVAR invoice XML: $source_path"
+        return 0
+      fi
+      if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
+        info "Invoice XML date not found; keeping at hoa don dau vao root: $source_path"
+      fi
+      process_invoice_xml \
+        "$source_path" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" \
+        "$invoice_no" "$file_mtime" "$file_size" "$sha"
+      return 0
+    fi
   fi
 
   if printf '%s' "$file_lower" | grep -q '\.pdf$'; then
@@ -2043,9 +2188,19 @@ rescan_classified_file() {
 
   cached=$(metadata_cache_get "$sha")
   if [ -n "$cached" ]; then
+    cached_is_invoice=$(printf '%s' "$cached" | cut -f1)
     cached_year=$(printf '%s' "$cached" | cut -f2)
     cached_vendor=$(printf '%s' "$cached" | cut -f5)
-    if [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
+    file_name_upper=$(basename "$source_path" | tr '[:lower:]' '[:upper:]')
+    force_pdf_reparse=0
+    case "$file_name_upper" in
+      *ATTP*|*EBL[0-9]*_*)
+        force_pdf_reparse=1
+        ;;
+    esac
+    if [ "$force_pdf_reparse" -eq 1 ] && [ "$cached_is_invoice" != "1" ]; then
+      info "Ignoring stale non-invoice metadata cache during rescan: $source_path"
+    elif [ "$cached_vendor" != "Unknown Vendor" ] && { [ -z "$cached_year" ] || [ "$cached_year" -le 2027 ]; }; then
       parsed=$(printf '%s' "$cached" | cut -f1-10)
       parse_source=$(printf '%s' "$cached" | cut -f11)
       info "Invoice metadata cache hit during rescan: $source_path"
@@ -2366,6 +2521,8 @@ main() {
   if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
     info "Listing vendor reference DB"
   fi
+
+  cleanup_old_logs
 
   if [ "$VENDOR_LIST_MODE" -ne 1 ] && [ ! -d "$IVAR_DATA" ]; then
     error "Destination folder not found: $IVAR_DATA"

@@ -26,6 +26,10 @@ DOCUMENTS_ROOT = TOOL_ROOT.parent
 YEAR_ROOT = DOCUMENTS_ROOT / "2026"
 STATE_DIR_NAME = ".wip"
 DEFAULT_SCOPES = (
+    "AT.GHTK reports",
+    "AT.B2",
+    "AT.VAT",
+    "AT.Shopee reports",
     "WIP ke toan thue",
     "Review Label",
     "ho so danh gia CUC 20260421",
@@ -42,6 +46,12 @@ DEFAULT_RULES = {
     ],
     "generated_name_patterns": [r"^pdftohtml", r"^pdftotext", r"^text\.txt$", r"^agents\.md$"],
     "categories": [
+        {"id": "vat", "label": "VAT", "confidence": 0.98,
+         "patterns": [r"iv-mtt-batch"],
+         "target": "IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau ra"},
+        {"id": "shopee_reports", "label": "Shopee reports", "confidence": 0.96,
+         "patterns": [r"(?:^|/)at\.shopee reports(?:/|$)", r"order\."],
+         "target": "IVAR/Marketing-Sales-CS/Shopee"},
         {"id": "finance_ops", "label": "Finance & Operations", "confidence": 0.94,
          "patterns": [r"(?:^|/)(?:wip ke toan thue|acb saoke)(?:/|$)", r"order\.", r"ghtk_", r"bien_ban_doi_soat", r"c[oô]ng n[oợ]", r"chi[_ -]?tiet[_ -]?cong[_ -]?no", r"sao ?ke", r"so_tien_gui", r"iv-mtt-batch", r"h[oó]a[- ]?d[oơ]n", r"invoice", r"\bunc\b"],
          "target": "IVAR/Accounting - Ke toan/Data - Du lieu"},
@@ -57,8 +67,11 @@ DEFAULT_RULES = {
         {"id": "legal_corporate", "label": "Legal & Corporate", "confidence": 0.88,
          "patterns": [r"h[oợ]p d[oồ]ng", r"u[yỷ][ _-]?quy[eề]n", r"dkkd", r"bhxh", r"v[ăa]n ph[oò]ng", r"sepay", r"vietnam bank", r"vietinbank"],
          "target": "IVAR/Legal - Phap ly"},
+        {"id": "sourcing_logistics", "label": "Sourcing & Logistics", "confidence": 0.94,
+         "patterns": [r"^hbl-", r"bill of lading", r"packing list", r"v[aậ]n đơn"],
+         "target": "IVAR/Sourcing - Nhap hang/Logistics"},
         {"id": "technical", "label": "Technical / Quarantine", "confidence": 0.97,
-         "patterns": [r"\.(?:log|deb|dmg|tar\.gz)$", r"(?:^|/)(?:plugin codes|code)(?:/|$)", r"^new\.html$"],
+         "patterns": [r"\.(?:log|deb|dmg|tar\.gz)$", r"^log\.", r"(?:^|/)(?:plugin codes|code)(?:/|$)", r"^new\.html$"],
          "target": "2026/91_TECH_QUARANTINE"},
     ],
 }
@@ -279,6 +292,56 @@ def set_dossier_status(year_root: Path, dossier_id: str, status: str) -> None:
         conn.execute("INSERT INTO events(created_at, event_type, subject, detail) VALUES (?, 'status_change', ?, ?)", (now, dossier_id, status))
 
 
+def review_dossier(year_root: Path, dossier_id: str, category: str, target: str | None, status: str, note: str) -> None:
+    """Record a human routing decision in the index without touching source files."""
+    if status not in VALID_STATUSES or status in {"captured", "auto_classified", "needs_review"}:
+        raise ValueError("review status must be in_progress, waiting_external, approved, filed, or archived")
+    database, _ = ensure_state(year_root)
+    categories = {item["id"]: item for item in load_rules(year_root)["categories"]}
+    if category not in categories:
+        raise ValueError(f"unknown category: {category}")
+    proposed_target = target if target is not None else categories[category]["target"]
+    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    with open_db(database) as conn:
+        found = conn.execute("SELECT 1 FROM dossiers WHERE dossier_id = ?", (dossier_id,)).fetchone()
+        if not found:
+            raise ValueError(f"dossier not found: {dossier_id}")
+        conn.execute(
+            "UPDATE dossiers SET category = ?, status = ?, proposed_target = ?, updated_at = ? WHERE dossier_id = ?",
+            (category, status, proposed_target, now, dossier_id),
+        )
+        conn.execute(
+            """UPDATE documents SET category = ?, confidence = 1.0, classification_reason = ?,
+               proposed_target = ?, status = ? WHERE dossier_id = ? AND active = 1""",
+            (category, f"manual review: {note or 'routing decision'}", proposed_target, status, dossier_id),
+        )
+        detail = json.dumps({"category": category, "target": proposed_target, "status": status, "note": note}, ensure_ascii=False)
+        conn.execute("INSERT INTO events(created_at, event_type, subject, detail) VALUES (?, 'manual_review', ?, ?)", (now, dossier_id, detail))
+
+
+def review_queue(year_root: Path) -> list[sqlite3.Row]:
+    database, _ = ensure_state(year_root)
+    with open_db(database) as conn:
+        return conn.execute(
+            """SELECT dossier_id, path, classification_reason FROM documents
+               WHERE active = 1 AND status = 'needs_review' ORDER BY path"""
+        ).fetchall()
+
+
+def next_action(status: str) -> str:
+    actions = {
+        "captured": "Run classification scan.",
+        "auto_classified": "Check target and evidence, then start work or request a correction.",
+        "needs_review": "Choose category and destination with the review command.",
+        "in_progress": "Complete the dossier checklist and resolve missing evidence.",
+        "waiting_external": "Follow up with the external owner and record the response.",
+        "approved": "Ready for a future copy-and-hash filing step; filing is not enabled.",
+        "filed": "Verify final location and archive the dossier when retention allows.",
+        "archived": "No further action.",
+    }
+    return actions.get(status, "Review dossier status.")
+
+
 def dashboard(year_root: Path, output: Path | None = None) -> Path:
     database, _ = ensure_state(year_root)
     output = output or state_dir(year_root) / "dashboard.html"
@@ -287,7 +350,8 @@ def dashboard(year_root: Path, output: Path | None = None) -> Path:
     with open_db(database) as conn:
         rows = conn.execute(
             """SELECT d.dossier_id, d.category, d.status, d.proposed_target, d.updated_at, COUNT(doc.path) AS document_count,
-                      GROUP_CONCAT(doc.path, '||') AS paths
+                      MIN(doc.confidence) AS confidence, GROUP_CONCAT(doc.path, '||') AS paths,
+                      GROUP_CONCAT(DISTINCT doc.classification_reason) AS reasons
                  FROM dossiers d JOIN documents doc ON doc.dossier_id = d.dossier_id
                  WHERE doc.active = 1 GROUP BY d.dossier_id ORDER BY d.updated_at DESC"""
         ).fetchall()
@@ -305,12 +369,15 @@ def dashboard(year_root: Path, output: Path | None = None) -> Path:
             extra = f"<div class='more'>+{len(paths)-3} files</div>" if len(paths) > 3 else ""
             target = html.escape(row["proposed_target"] or "No target proposed")
             category_label = html.escape(labels_by_category.get(row["category"], row["category"]))
-            cards.append(f"<article class='card'><h3>{html.escape(row['dossier_id'])}</h3><p class='category'>{category_label} · {row['document_count']} files</p><p class='target'>{target}</p><p class='paths'>{preview}</p>{extra}</article>")
+            confidence = f"{float(row['confidence']) * 100:.0f}% confidence"
+            reasons = html.escape(row["reasons"] or "No evidence recorded")
+            action = html.escape(next_action(status))
+            cards.append(f"<article class='card'><h3>{html.escape(row['dossier_id'])}</h3><p class='category'>{category_label} · {row['document_count']} files · {confidence}</p><p class='target'>{target}</p><p class='action'><strong>Next:</strong> {action}</p><p class='evidence'><strong>Evidence:</strong> {reasons}</p><p class='paths'>{preview}</p>{extra}</article>")
         board.append(f"<section class='column'><header><h2>{labels[status]}</h2><span>{len(by_status[status])}</span></header>{''.join(cards) or '<p class=empty>No dossier</p>'}</section>")
     total = sum(row["document_count"] for row in rows)
     output.write_text(f"""<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>2026 WIP Kanban</title><style>
-*{{box-sizing:border-box}}body{{margin:0;background:#f6f7fb;color:#1c1b20;font:14px/1.45 Arial,sans-serif}}main{{padding:24px;max-width:2200px;margin:auto}}h1{{margin:0;font-size:28px}}.subtitle{{color:#5f6368}}.board{{display:grid;grid-template-columns:repeat(7,minmax(265px,1fr));gap:16px;overflow-x:auto;padding:8px 0 20px}}.column{{background:#eef0f7;border-radius:16px;padding:12px;min-height:280px}}.column header{{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 12px}}.column h2{{font-size:15px;margin:0}}.column header span{{background:#d9e2ff;color:#17386d;border-radius:999px;padding:2px 9px;font-weight:bold}}.card{{background:#fff;border-radius:12px;padding:13px;margin:10px 0;box-shadow:0 1px 3px #0002;border-left:4px solid #4f73c7}}.card h3{{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}}.category{{color:#4a5568;margin:0 0 8px;text-transform:capitalize}}.target{{background:#eef4ff;color:#174ea6;margin:0 -2px 9px;padding:5px 7px;border-radius:6px;overflow-wrap:anywhere}}.paths{{color:#5f6368;font-size:12px;margin:0;overflow-wrap:anywhere}}.more,.empty{{color:#697386;font-style:italic}}@media(max-width:700px){{main{{padding:16px}}.board{{grid-template-columns:repeat(7,84vw)}}}}</style>
+*{{box-sizing:border-box}}body{{margin:0;background:#f6f7fb;color:#1c1b20;font:14px/1.45 Arial,sans-serif}}main{{padding:24px;max-width:2200px;margin:auto}}h1{{margin:0;font-size:28px}}.subtitle{{color:#5f6368}}.board{{display:grid;grid-template-columns:repeat(7,minmax(265px,1fr));gap:16px;overflow-x:auto;padding:8px 0 20px}}.column{{background:#eef0f7;border-radius:16px;padding:12px;min-height:280px}}.column header{{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 12px}}.column h2{{font-size:15px;margin:0}}.column header span{{background:#d9e2ff;color:#17386d;border-radius:999px;padding:2px 9px;font-weight:bold}}.card{{background:#fff;border-radius:12px;padding:13px;margin:10px 0;box-shadow:0 1px 3px #0002;border-left:4px solid #4f73c7}}.card h3{{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}}.category{{color:#4a5568;margin:0 0 8px;text-transform:capitalize}}.target{{background:#eef4ff;color:#174ea6;margin:0 -2px 9px;padding:5px 7px;border-radius:6px;overflow-wrap:anywhere}}.action{{background:#f4f7f8;margin:0 -2px 8px;padding:6px 7px;border-radius:6px}}.evidence{{color:#4a5568;font-size:12px;margin:0 0 8px;overflow-wrap:anywhere}}.paths{{color:#5f6368;font-size:12px;margin:0;overflow-wrap:anywhere}}.more,.empty{{color:#697386;font-style:italic}}@media(max-width:700px){{main{{padding:16px}}.board{{grid-template-columns:repeat(7,84vw)}}}}</style>
 <main><h1>2026 WIP Kanban</h1><p class='subtitle'>{len(rows)} dossiers · {total} active documents · Index only: no file has been moved or deleted.</p><div class='board'>{''.join(board)}</div></main>""", encoding="utf-8")
     return output
 
@@ -328,6 +395,13 @@ def parser() -> argparse.ArgumentParser:
     status = sub.add_parser("set-status", help="Update a dossier status in the index; does not touch documents")
     status.add_argument("dossier_id")
     status.add_argument("status", choices=VALID_STATUSES)
+    review = sub.add_parser("review", help="Record a human category and target decision; does not touch documents")
+    review.add_argument("dossier_id")
+    review.add_argument("category", help="category id from rules.json")
+    review.add_argument("--target", help="override the category's proposed target")
+    review.add_argument("--status", choices=("in_progress", "waiting_external", "approved", "filed", "archived"), default="in_progress")
+    review.add_argument("--note", default="", help="short reason recorded in the local audit log")
+    sub.add_parser("review-queue", help="List dossiers still requiring a human routing decision")
     return result
 
 
@@ -347,6 +421,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "set-status":
         set_dossier_status(year_root, args.dossier_id, args.status)
         print(f"Updated {args.dossier_id} to {args.status}; no files changed.")
+    elif args.command == "review":
+        review_dossier(year_root, args.dossier_id, args.category, args.target, args.status, args.note)
+        print(f"Recorded manual review for {args.dossier_id}; no files changed.")
+    elif args.command == "review-queue":
+        for row in review_queue(year_root):
+            print(f"{row['dossier_id']}\t{row['path']}\t{row['classification_reason']}")
     return 0
 
 

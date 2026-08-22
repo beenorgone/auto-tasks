@@ -18,9 +18,11 @@ The generated state is outside this repository at:
 - `../2026/.wip/rules.json` — editable deterministic classification rules
 - `../2026/.wip/dashboard.html` — Material-style Kanban board
 
-The default scan indexes root-level files plus `WIP ke toan thue`, `Review
-Label`, the CUC dossier, and product self-declaration dossier. Personal book
-collections and PDF conversion artefacts are excluded by policy.
+The default scan indexes root-level files plus `AT.GHTK reports`, `AT.B2`,
+`AT.VAT`, `AT.Shopee reports`, `WIP ke toan thue`, `Review Label`, the CUC
+dossier, and product self-declaration dossier. The `AT.` prefix identifies
+folders maintained by automation rules. Personal book collections and PDF
+conversion artefacts are excluded by policy.
 
 Use a narrowly scoped inventory when refining rules:
 
@@ -33,6 +35,16 @@ Update a dossier's WIP state without touching its documents:
 
 ```bash
 python3 wip-organizer.py set-status FINANCE_OPS-2026-08-GHTK in_progress
+```
+
+Review the manual-routing queue, then record a human decision without filing
+the source document:
+
+```bash
+python3 wip-organizer.py review-queue
+python3 wip-organizer.py review NEEDS_REVIEW-2026-08-EXAMPLE legal_corporate \
+  --status in_progress --note 'confirmed legal authorization dossier'
+python3 wip-organizer.py dashboard
 ```
 
 Filing to project folders is intentionally a later phase requiring an

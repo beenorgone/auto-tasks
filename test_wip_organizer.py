@@ -15,6 +15,9 @@ class WipOrganizerTests(unittest.TestCase):
         self.assertIn("AT.B2", WIP.DEFAULT_SCOPES)
         self.assertIn("AT.VAT", WIP.DEFAULT_SCOPES)
         self.assertIn("AT.Shopee reports", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT.QC reports", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT.Sourcing contracts", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT.Invoice intake", WIP.DEFAULT_SCOPES)
 
     def test_deterministic_rules(self):
         for path, category in [
@@ -22,12 +25,14 @@ class WipOrganizerTests(unittest.TestCase):
             ("CHI_TIET_CONG_NO_PHAI_TRA FUJAN.xlsx", "finance_ops"),
             ("iv-mtt-batch36-20260819-163502.xlsx", "vat"),
             ("Order.all.20260701_20260731.xlsx", "shopee_reports"),
+            ("AT.QC reports/743-2026-00172508.pdf", "quality_regulatory"),
             ("Review Label/2026.05.14/Print Label Organic Matcha Powder.pdf", "packaging"),
             ("ho so danh gia CUC 20260421/Mau nhat ky luu mau.pdf", "quality_regulatory"),
             ("Shopee_mass_upload_2026-08-17_100629.xlsx", "commerce"),
             ("ivarvietnam.com-1787197766379.log", "technical"),
             ("mau-giay-uy-quyen-ca-nhan-cho-ca-nhan_2003225702.docx", "legal_corporate"),
             ("HBL-LSUHPG26071866QDS (3).pdf", "sourcing_logistics"),
+            ("AT.Sourcing contracts/DRAFT SC8965 Bioway.docx", "sourcing_logistics"),
             ("log.adff603fbfbd.txt", "technical"),
         ]:
             actual, confidence, _, _ = WIP.classify(Path(path), WIP.DEFAULT_RULES)

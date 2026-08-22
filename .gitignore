@@ -1,2 +1,4 @@
 ivar-documents-organizer/logs
 playwright-cli/
+__pycache__/
+*.py[cod]

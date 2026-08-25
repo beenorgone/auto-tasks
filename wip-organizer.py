@@ -51,12 +51,15 @@ DEFAULT_RULES = {
     "categories": [
         {"id": "vat", "label": "VAT", "confidence": 0.98,
          "patterns": [r"iv-mtt-batch"],
-         "target": "IVAR/Accounting - Ke toan/Data - Du lieu/hoa don dau ra"},
+         "target": "AT.VAT", "route_mode": "managed_move"},
         {"id": "shopee_reports", "label": "Shopee reports", "confidence": 0.96,
          "patterns": [r"(?:^|/)at\.shopee reports(?:/|$)", r"order\."],
-         "target": "IVAR/Marketing-Sales-CS/Shopee"},
+         "target": "AT.Shopee reports", "route_mode": "managed_move"},
+        {"id": "ghtk_reports", "label": "GHTK reports", "confidence": 0.97,
+         "patterns": [r"(?:^|/)at\.ghtk reports(?:/|$)", r"ghtk_", r"bien_ban_doi_soat"],
+         "target": "AT.GHTK reports", "route_mode": "managed_move"},
         {"id": "finance_ops", "label": "Finance & Operations", "confidence": 0.94,
-         "patterns": [r"(?:^|/)(?:wip ke toan thue|acb saoke)(?:/|$)", r"order\.", r"ghtk_", r"bien_ban_doi_soat", r"c[oô]ng n[oợ]", r"chi[_ -]?tiet[_ -]?cong[_ -]?no", r"sao ?ke", r"so_tien_gui", r"iv-mtt-batch", r"h[oó]a[- ]?d[oơ]n", r"invoice", r"\bunc\b"],
+         "patterns": [r"(?:^|/)(?:wip ke toan thue|acb saoke)(?:/|$)", r"c[oô]ng n[oợ]", r"chi[_ -]?tiet[_ -]?cong[_ -]?no", r"sao ?ke", r"so_tien_gui", r"h[oó]a[- ]?d[oơ]n", r"invoice", r"\bunc\b"],
          "target": "IVAR/Accounting - Ke toan/Data - Du lieu"},
         {"id": "quality_regulatory", "label": "Quality & Regulatory", "confidence": 0.93,
          "patterns": [r"(?:^|/)at\.qc reports(?:/|$)", r"tự công bố", r"ho so danh gia cuc", r"\bcoa\b", r"\bqcvn\b", r"attp", r"ki[eể]m nghi[eệ]m", r"ssop", r"chứng nh[aậ]n", r"c[oô]ng b[oố]"],
@@ -174,13 +177,14 @@ def is_excluded(relative: Path, rules: dict) -> bool:
     return False
 
 
-def classify(relative: Path, rules: dict) -> tuple[str, float, str, str | None]:
+def classify(relative: Path, rules: dict) -> tuple[str, float, str, str | None, str]:
     text = normalized(relative.as_posix())
     for category in rules["categories"]:
         matched = [pattern for pattern in category["patterns"] if re.search(pattern, text, re.I)]
         if matched:
-            return category["id"], float(category["confidence"]), f"rule: {matched[0]}", category["target"]
-    return "needs_review", 0.0, "no deterministic rule matched", None
+            route_mode = category.get("route_mode", "review_only")
+            return category["id"], float(category["confidence"]), f"rule: {matched[0]}", category["target"], route_mode
+    return "needs_review", 0.0, "no deterministic rule matched", None, "review_only"
 
 
 def extract_period(name: str, modified_at: int) -> str:
@@ -259,7 +263,7 @@ def scan(year_root: Path, source_names: list[str], root_files: bool) -> dict[str
             relative = path.relative_to(year_root)
             prior = conn.execute("SELECT sha256, byte_size, modified_at, status FROM documents WHERE path = ?", (relative.as_posix(),)).fetchone()
             sha = prior["sha256"] if prior and prior["byte_size"] == stat.st_size and prior["modified_at"] == stat.st_mtime_ns else digest(path)
-            category, confidence, reason, target = classify(relative, rules)
+            category, confidence, reason, target, _route_mode = classify(relative, rules)
             dossier_id = dossier_for(category, relative, stat.st_mtime)
             status = prior["status"] if prior and prior["status"] not in {"captured", "auto_classified", "needs_review"} else ("auto_classified" if confidence >= 0.85 else "needs_review")
             conn.execute(
@@ -320,6 +324,14 @@ def review_dossier(year_root: Path, dossier_id: str, category: str, target: str 
         )
         detail = json.dumps({"category": category, "target": proposed_target, "status": status, "note": note}, ensure_ascii=False)
         conn.execute("INSERT INTO events(created_at, event_type, subject, detail) VALUES (?, 'manual_review', ?, ?)", (now, dossier_id, detail))
+
+
+def route_file(rules_file: Path, relative_path: str) -> tuple[str, float, str | None, str, str]:
+    """Classify a single path against an explicit rules file; makes no file changes."""
+    with rules_file.open(encoding="utf-8") as handle:
+        rules = json.load(handle)
+    category, confidence, reason, target, route_mode = classify(Path(relative_path), rules)
+    return category, confidence, target, route_mode, reason
 
 
 def review_queue(year_root: Path) -> list[sqlite3.Row]:
@@ -405,11 +417,22 @@ def parser() -> argparse.ArgumentParser:
     review.add_argument("--status", choices=("in_progress", "waiting_external", "approved", "filed", "archived"), default="in_progress")
     review.add_argument("--note", default="", help="short reason recorded in the local audit log")
     sub.add_parser("review-queue", help="List dossiers still requiring a human routing decision")
+    route = sub.add_parser("route", help="Classify one path against a rules file; makes no file changes")
+    route.add_argument("--rules", type=Path, required=True, help="path to a rules.json file")
+    route.add_argument("--path", required=True, help="relative path or filename to classify")
+    route.add_argument("--format", choices=("tsv",), default="tsv")
     return result
+
+
+ROUTE_NOT_APPROVED = 3
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "route":
+        category, confidence, target, route_mode, reason = route_file(args.rules, args.path)
+        print("\t".join([category, f"{confidence:g}", target or "", route_mode, reason]))
+        return 0 if (route_mode == "managed_move" and target) else ROUTE_NOT_APPROVED
     year_root = args.year_root.resolve()
     if not year_root.is_dir():
         raise SystemExit(f"Year root does not exist: {year_root}")

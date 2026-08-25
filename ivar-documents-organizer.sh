@@ -7,6 +7,8 @@
 
 set -eu
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WIP_ORGANIZER_PY="${WIP_ORGANIZER_PY:-${SCRIPT_DIR}/wip-organizer.py}"
 HOME_DIR=${HOME:-/home/beenorgone}
 DOCS_ROOT="${HOME_DIR}/Documents"
 DOWNLOADS_ROOT="${HOME_DIR}/Downloads"
@@ -30,6 +32,8 @@ RESCAN_MODE=0
 RESCAN_UNC_MODE=0
 NO_DUPLICATES=0
 VENDOR_LIST_MODE=0
+PLAN_MANAGED_RULES=0
+APPLY_MANAGED_RULES=0
 
 usage() {
   cat <<'EOF'
@@ -44,6 +48,14 @@ Options:
   --no-duplicates
               During rescan, remove same-content duplicate files instead of keeping _sha copies.
   --vendors   Print known vendor MST/name reference from the local vendor DB.
+  --plan-managed-rules
+              Read-only: ask the WIP rule engine for managed routes (VAT,
+              Shopee reports, GHTK reports) for loose files in the current
+              year root and log the proposal. Never moves files.
+  --apply-managed-rules
+              Move loose files in the current year root that match an
+              approved managed route (VAT, Shopee reports, GHTK reports)
+              into their AT.* destination.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
@@ -70,6 +82,12 @@ while [ $# -gt 0 ]; do
     --vendors)
       VENDOR_LIST_MODE=1
       ;;
+    --plan-managed-rules)
+      PLAN_MANAGED_RULES=1
+      ;;
+    --apply-managed-rules)
+      APPLY_MANAGED_RULES=1
+      ;;
     --no-sync)
       NO_SYNC=1
       ;;
@@ -88,6 +106,11 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$PLAN_MANAGED_RULES" -eq 1 ] && [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+  printf 'Cannot combine --plan-managed-rules and --apply-managed-rules\n' >&2
+  exit 1
+fi
 
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/${CURRENT_DATE}.log"
@@ -1940,6 +1963,91 @@ maybe_rollover_previous_month() {
   done
 }
 
+is_approved_managed_target() {
+  target=$1
+  case "$target" in
+    "AT.VAT" | "AT.Shopee reports" | "AT.GHTK reports") ;;
+    *)
+      return 1
+      ;;
+  esac
+  case "$target" in
+    /*)
+      return 1
+      ;;
+  esac
+  case "$target" in
+    *..*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+route_and_apply_managed_file() {
+  source_path=$1
+  file_mtime=$2
+  file_size=$3
+  sha=$4
+
+  if [ ! -f "$WIP_ORGANIZER_PY" ]; then
+    return 1
+  fi
+  rules_file="${CURRENT_YEAR_ROOT}/.wip/rules.json"
+  if [ ! -f "$rules_file" ]; then
+    return 1
+  fi
+
+  base=$(basename "$source_path")
+  require_command python3
+  route_line=$(python3 "$WIP_ORGANIZER_PY" route --rules "$rules_file" --path "$base" --format tsv 2>/dev/null)
+  route_status=$?
+  if [ "$route_status" -ne 0 ] || [ -z "$route_line" ]; then
+    return 1
+  fi
+
+  category=$(printf '%s' "$route_line" | cut -f1)
+  target=$(printf '%s' "$route_line" | cut -f3)
+  route_mode=$(printf '%s' "$route_line" | cut -f4)
+  reason=$(printf '%s' "$route_line" | cut -f5)
+
+  if [ "$route_mode" != "managed_move" ]; then
+    return 1
+  fi
+  if ! is_approved_managed_target "$target"; then
+    warn "Rejected managed route target outside allow-list: $target ($source_path)"
+    return 1
+  fi
+
+  dest_dir="${CURRENT_YEAR_ROOT}/${target}"
+  dest_path="${dest_dir}/${base}"
+
+  if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
+    info "PLAN managed-route: $source_path -> $dest_path [category=$category reason=$reason]"
+    return 0
+  fi
+
+  if [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+    ensure_dir "$dest_dir"
+    if [ -e "$dest_path" ]; then
+      stem=${base%.*}
+      ext=${base##*.}
+      if [ "$stem" = "$ext" ]; then
+        ext=""
+      else
+        ext=".${ext}"
+      fi
+      dest_path="${dest_dir}/${stem}_${sha}${ext}"
+    fi
+    run_cmd mv "$source_path" "$dest_path"
+    info "Managed route: $source_path -> $dest_path [category=$category]"
+    record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$dest_path" "managed-route" "" "" "" "" "" "category=$category; $reason"
+    return 0
+  fi
+
+  return 1
+}
+
 process_source_file() {
   source_path=$1
   tmp_root=$2
@@ -1963,6 +2071,23 @@ process_source_file() {
     duplicate_target=$(move_to_duplicate "$source_path" "$CURRENT_YEAR" "$CURRENT_MONTH" "$sha" "$dup_record")
     record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$dup_record"
     return 0
+  fi
+
+  if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+    source_dir_for_route=$(dirname "$source_path")
+    route_file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+    if [ "$source_dir_for_route" = "$CURRENT_YEAR_ROOT" ]; then
+      case "$route_file_lower" in
+        *.xml | *.pdf)
+          # Invoice PDF/XML and UNC processing keep their existing higher-priority handlers.
+          ;;
+        *)
+          if route_and_apply_managed_file "$source_path" "$file_mtime" "$file_size" "$sha"; then
+            return 0
+          fi
+          ;;
+      esac
+    fi
   fi
 
   text_file="${tmp_root}/$(basename "$source_path").txt"
@@ -2520,6 +2645,12 @@ main() {
   fi
   if [ "$VENDOR_LIST_MODE" -eq 1 ]; then
     info "Listing vendor reference DB"
+  fi
+  if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
+    info "Running with managed WIP route planning enabled (read-only)"
+  fi
+  if [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+    info "Running with managed WIP route application enabled"
   fi
 
   cleanup_old_logs

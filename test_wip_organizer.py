@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +22,8 @@ class WipOrganizerTests(unittest.TestCase):
 
     def test_deterministic_rules(self):
         for path, category in [
-            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "finance_ops"),
+            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports"),
+            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports"),
             ("CHI_TIET_CONG_NO_PHAI_TRA FUJAN.xlsx", "finance_ops"),
             ("iv-mtt-batch36-20260819-163502.xlsx", "vat"),
             ("Order.all.20260701_20260731.xlsx", "shopee_reports"),
@@ -35,9 +37,65 @@ class WipOrganizerTests(unittest.TestCase):
             ("AT.Sourcing contracts/DRAFT SC8965 Bioway.docx", "sourcing_logistics"),
             ("log.adff603fbfbd.txt", "technical"),
         ]:
-            actual, confidence, _, _ = WIP.classify(Path(path), WIP.DEFAULT_RULES)
+            actual, confidence, _, _, _ = WIP.classify(Path(path), WIP.DEFAULT_RULES)
             self.assertEqual(category, actual)
             self.assertGreaterEqual(confidence, 0.85)
+
+    def test_managed_move_rules_route_to_at_folders(self):
+        for path, category, target in [
+            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "AT.VAT"),
+            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "AT.Shopee reports"),
+            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "AT.GHTK reports"),
+            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "AT.GHTK reports"),
+        ]:
+            actual_category, confidence, reason, actual_target, route_mode = WIP.classify(Path(path), WIP.DEFAULT_RULES)
+            self.assertEqual(category, actual_category)
+            self.assertEqual(target, actual_target)
+            self.assertEqual("managed_move", route_mode)
+            self.assertGreaterEqual(confidence, 0.85)
+            self.assertTrue(reason.startswith("rule: "))
+
+    def test_unrelated_ghtk_text_is_not_managed_routed(self):
+        category, _confidence, _reason, _target, route_mode = WIP.classify(
+            Path("GHTK bao cao thang 08 khong dung dinh dang.xlsx"), WIP.DEFAULT_RULES
+        )
+        self.assertNotEqual("ghtk_reports", category)
+        self.assertNotEqual("managed_move", route_mode)
+
+    def test_route_command_reports_managed_move_and_review_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            rules_file = Path(temporary) / "rules.json"
+            rules_file.write_text(json.dumps(WIP.DEFAULT_RULES, ensure_ascii=False), encoding="utf-8")
+
+            category, confidence, target, route_mode, reason = WIP.route_file(
+                rules_file, "GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx"
+            )
+            self.assertEqual(("ghtk_reports", "AT.GHTK reports", "managed_move"), (category, target, route_mode))
+            self.assertGreaterEqual(confidence, 0.85)
+            self.assertTrue(reason)
+
+            category, _confidence, target, route_mode, _reason = WIP.route_file(
+                rules_file, "mau-giay-uy-quyen-ca-nhan-cho-ca-nhan_2003225702.docx"
+            )
+            self.assertEqual(("legal_corporate", "review_only"), (category, route_mode))
+            self.assertIsNotNone(target)
+
+            category, _confidence, target, route_mode, _reason = WIP.route_file(rules_file, "unclassified-file.bin")
+            self.assertEqual(("needs_review", "review_only"), (category, route_mode))
+            self.assertIsNone(target)
+
+    def test_route_command_cli_exit_code_reflects_approval(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            rules_file = Path(temporary) / "rules.json"
+            rules_file.write_text(json.dumps(WIP.DEFAULT_RULES, ensure_ascii=False), encoding="utf-8")
+            approved = WIP.main([
+                "route", "--rules", str(rules_file), "--path", "iv-mtt-batch36-20260819-163502.xlsx", "--format", "tsv",
+            ])
+            self.assertEqual(0, approved)
+            rejected = WIP.main([
+                "route", "--rules", str(rules_file), "--path", "unclassified-file.bin", "--format", "tsv",
+            ])
+            self.assertEqual(WIP.ROUTE_NOT_APPROVED, rejected)
 
     def test_scan_is_index_only_and_dashboard_is_generated(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -47,10 +105,10 @@ class WipOrganizerTests(unittest.TestCase):
             source.write_bytes(b"report")
             original = source.read_bytes()
             result = WIP.scan(root, [], True)
-            self.assertEqual(1, result["finance_ops"])
+            self.assertEqual(1, result["ghtk_reports"])
             self.assertEqual(original, source.read_bytes())
             output = WIP.dashboard(root)
-            self.assertIn("Finance &amp; Operations", output.read_text(encoding="utf-8"))
+            self.assertIn("GHTK reports", output.read_text(encoding="utf-8"))
 
     def test_personal_book_scope_is_excluded(self):
         with tempfile.TemporaryDirectory() as temporary:

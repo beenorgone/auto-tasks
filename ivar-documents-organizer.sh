@@ -1984,6 +1984,12 @@ is_approved_managed_target() {
   return 0
 }
 
+delete_junk_log_file() {
+  source_path=$1
+  run_cmd rm -f "$source_path"
+  info "Deleted junk log file: $source_path"
+}
+
 route_and_apply_managed_file() {
   source_path=$1
   file_mtime=$2
@@ -2065,6 +2071,21 @@ process_source_file() {
     return 0
   fi
 
+  source_dir_for_route=$(dirname "$source_path")
+  route_file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
+
+  if [ "$source_dir_for_route" = "$CURRENT_YEAR_ROOT" ]; then
+    case "$route_file_lower" in
+      *.log)
+        # Delete before duplicate detection: byte-identical junk logs (common for
+        # crawl/telemetry logs) must never be diverted into duplicates/ instead
+        # of being removed outright.
+        delete_junk_log_file "$source_path"
+        return 0
+        ;;
+    esac
+  fi
+
   sha=$(sha256_file "$source_path")
   dup_record=$(db_find_sha "$sha")
   if [ -n "$dup_record" ]; then
@@ -2074,8 +2095,6 @@ process_source_file() {
   fi
 
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
-    source_dir_for_route=$(dirname "$source_path")
-    route_file_lower=$(printf '%s' "$source_path" | tr '[:upper:]' '[:lower:]')
     if [ "$source_dir_for_route" = "$CURRENT_YEAR_ROOT" ]; then
       case "$route_file_lower" in
         *.xml | *.pdf)

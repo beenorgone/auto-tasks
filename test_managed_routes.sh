@@ -83,4 +83,29 @@ run_organizer --apply-managed-rules
 [ -f "${YEAR_ROOT}/AT.VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
 echo "OK: second apply run is idempotent"
 
+echo "== junk .log cleanup: dry-run preserves, a normal run deletes =="
+JUNK_LOG="somesite.com-1755999999999.log"
+printf 'junk crawl log' >"${YEAR_ROOT}/${JUNK_LOG}"
+
+run_organizer --dry-run
+[ -f "${YEAR_ROOT}/${JUNK_LOG}" ] || fail "dry-run deleted the junk log file"
+echo "OK: --dry-run preserves junk .log files"
+
+run_organizer
+[ ! -e "${YEAR_ROOT}/${JUNK_LOG}" ] || fail "junk .log file was not deleted on a normal run"
+echo "OK: a normal run deletes loose .log files from the year root"
+
+echo "== junk .log cleanup: byte-identical logs must both be deleted, never routed to duplicates/ =="
+DUP_LOG_A="sitea.com-1111111111111.log"
+DUP_LOG_B="siteb.com-2222222222222.log"
+printf 'identical crawl payload' >"${YEAR_ROOT}/${DUP_LOG_A}"
+printf 'identical crawl payload' >"${YEAR_ROOT}/${DUP_LOG_B}"
+
+run_organizer
+[ ! -e "${YEAR_ROOT}/${DUP_LOG_A}" ] || fail "first byte-identical junk log was not deleted"
+[ ! -e "${YEAR_ROOT}/${DUP_LOG_B}" ] || fail "second byte-identical junk log was not deleted"
+stray=$(find "${YEAR_ROOT}" -type f -path "*/duplicates/site*.log" 2>/dev/null)
+[ -z "$stray" ] || fail "byte-identical junk log was diverted to duplicates/: $stray"
+echo "OK: byte-identical junk logs are both deleted outright, none diverted to duplicates/"
+
 echo "ALL MANAGED ROUTE INTEGRATION CHECKS PASSED"

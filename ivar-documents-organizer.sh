@@ -49,13 +49,15 @@ Options:
               During rescan, remove same-content duplicate files instead of keeping _sha copies.
   --vendors   Print known vendor MST/name reference from the local vendor DB.
   --plan-managed-rules
-              Read-only: ask the WIP rule engine for managed routes (VAT,
-              Shopee reports, GHTK reports) for loose files in the current
-              year root and log the proposal. Never moves files.
+              Read-only: normalize the managed-folder naming plan and ask the
+              WIP rule engine for managed routes (VAT, Shopee reports, GHTK
+              reports, SAOKE) for loose files in the current year root.
+              Never renames or moves files.
   --apply-managed-rules
               Move loose files in the current year root that match an
-              approved managed route (VAT, Shopee reports, GHTK reports)
-              into their AT.* destination.
+              approved managed route (VAT, Shopee reports, GHTK reports,
+              SAOKE) into their AT. * destination. Also renames top-level
+              managed folders from AT.name to AT. name when no collision exists.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
@@ -1966,7 +1968,7 @@ maybe_rollover_previous_month() {
 is_approved_managed_target() {
   target=$1
   case "$target" in
-    "AT.VAT" | "AT.Shopee reports" | "AT.GHTK reports") ;;
+    "AT. VAT" | "AT. Shopee reports" | "AT. GHTK reports" | "AT. SAOKE") ;;
     *)
       return 1
       ;;
@@ -1982,6 +1984,43 @@ is_approved_managed_target() {
       ;;
   esac
   return 0
+}
+
+normalize_managed_folder_names() {
+  [ -d "$CURRENT_YEAR_ROOT" ] || return 0
+
+  find "$CURRENT_YEAR_ROOT" -mindepth 1 -maxdepth 1 -type d -print | while IFS= read -r source_dir; do
+    source_name=$(basename "$source_dir")
+    case "$source_name" in
+      "AT. "*)
+        continue
+        ;;
+      AT.*)
+        target_name="AT. ${source_name#AT.}"
+        target_dir="${CURRENT_YEAR_ROOT}/${target_name}"
+        if [ -e "$target_dir" ]; then
+          warn "Managed-folder rename skipped because the target already exists: $source_dir -> $target_dir"
+          continue
+        fi
+        if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
+          info "PLAN managed-folder rename: $source_dir -> $target_dir"
+        elif [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+          run_cmd mv "$source_dir" "$target_dir"
+          info "Managed-folder renamed: $source_dir -> $target_dir"
+        fi
+        ;;
+    esac
+  done
+}
+
+initialize_managed_rules() {
+  [ -d "$CURRENT_YEAR_ROOT" ] || return 0
+  if [ ! -f "$WIP_ORGANIZER_PY" ]; then
+    warn "WIP rule engine not found: $WIP_ORGANIZER_PY"
+    return 1
+  fi
+  require_command python3
+  python3 "$WIP_ORGANIZER_PY" --year-root "$CURRENT_YEAR_ROOT" init >/dev/null
 }
 
 delete_junk_log_file() {
@@ -2097,7 +2136,7 @@ process_source_file() {
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
     if [ "$source_dir_for_route" = "$CURRENT_YEAR_ROOT" ]; then
       case "$route_file_lower" in
-        *.xml | *.pdf)
+        *.xml)
           # Invoice PDF/XML and UNC processing keep their existing higher-priority handlers.
           ;;
         *)
@@ -2670,6 +2709,11 @@ main() {
   fi
   if [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
     info "Running with managed WIP route application enabled"
+  fi
+
+  if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
+    initialize_managed_rules
+    normalize_managed_folder_names
   fi
 
   cleanup_old_logs

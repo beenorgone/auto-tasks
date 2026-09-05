@@ -12,13 +12,14 @@ SPEC.loader.exec_module(WIP)
 
 class WipOrganizerTests(unittest.TestCase):
     def test_default_scopes_include_automation_folders(self):
-        self.assertIn("AT.GHTK reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.B2", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.VAT", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.Shopee reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.QC reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.Sourcing contracts", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT.Invoice intake", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. GHTK reports", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. B2", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. VAT", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. Shopee reports", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. QC reports", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. Sourcing contracts", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. Invoice intake", WIP.DEFAULT_SCOPES)
+        self.assertIn("AT. SAOKE", WIP.DEFAULT_SCOPES)
 
     def test_deterministic_rules(self):
         for path, category in [
@@ -27,14 +28,14 @@ class WipOrganizerTests(unittest.TestCase):
             ("CHI_TIET_CONG_NO_PHAI_TRA FUJAN.xlsx", "finance_ops"),
             ("iv-mtt-batch36-20260819-163502.xlsx", "vat"),
             ("Order.all.20260701_20260731.xlsx", "shopee_reports"),
-            ("AT.QC reports/743-2026-00172508.pdf", "quality_regulatory"),
+            ("AT. QC reports/743-2026-00172508.pdf", "quality_regulatory"),
             ("Review Label/2026.05.14/Print Label Organic Matcha Powder.pdf", "packaging"),
             ("ho so danh gia CUC 20260421/Mau nhat ky luu mau.pdf", "quality_regulatory"),
             ("Shopee_mass_upload_2026-08-17_100629.xlsx", "commerce"),
             ("ivarvietnam.com-1787197766379.log", "technical"),
             ("mau-giay-uy-quyen-ca-nhan-cho-ca-nhan_2003225702.docx", "legal_corporate"),
             ("HBL-LSUHPG26071866QDS (3).pdf", "sourcing_logistics"),
-            ("AT.Sourcing contracts/DRAFT SC8965 Bioway.docx", "sourcing_logistics"),
+            ("AT. Sourcing contracts/DRAFT SC8965 Bioway.docx", "sourcing_logistics"),
             ("log.adff603fbfbd.txt", "technical"),
         ]:
             actual, confidence, _, _, _ = WIP.classify(Path(path), WIP.DEFAULT_RULES)
@@ -43,10 +44,11 @@ class WipOrganizerTests(unittest.TestCase):
 
     def test_managed_move_rules_route_to_at_folders(self):
         for path, category, target in [
-            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "AT.VAT"),
-            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "AT.Shopee reports"),
-            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "AT.GHTK reports"),
-            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "AT.GHTK reports"),
+            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "AT. VAT"),
+            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "AT. Shopee reports"),
+            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "AT. GHTK reports"),
+            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "AT. GHTK reports"),
+            ("11090087_SAOKE_TK_202608.xlsx", "bank_statements", "AT. SAOKE"),
         ]:
             actual_category, confidence, reason, actual_target, route_mode = WIP.classify(Path(path), WIP.DEFAULT_RULES)
             self.assertEqual(category, actual_category)
@@ -70,7 +72,7 @@ class WipOrganizerTests(unittest.TestCase):
             category, confidence, target, route_mode, reason = WIP.route_file(
                 rules_file, "GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx"
             )
-            self.assertEqual(("ghtk_reports", "AT.GHTK reports", "managed_move"), (category, target, route_mode))
+            self.assertEqual(("ghtk_reports", "AT. GHTK reports", "managed_move"), (category, target, route_mode))
             self.assertGreaterEqual(confidence, 0.85)
             self.assertTrue(reason)
 
@@ -96,6 +98,25 @@ class WipOrganizerTests(unittest.TestCase):
                 "route", "--rules", str(rules_file), "--path", "unclassified-file.bin", "--format", "tsv",
             ])
             self.assertEqual(WIP.ROUTE_NOT_APPROVED, rejected)
+
+    def test_existing_rules_are_migrated_without_overwriting_custom_rules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "2026"
+            root.mkdir()
+            rules = json.loads(json.dumps(WIP.DEFAULT_RULES))
+            rules["categories"] = [item for item in rules["categories"] if item["id"] != "bank_statements"]
+            for item in rules["categories"]:
+                if item["id"] == "vat":
+                    item["target"] = "AT.VAT"
+                if item["id"] == "commerce":
+                    item["target"] = "Custom sales target"
+            WIP.ensure_state(root)
+            WIP.rules_path(root).write_text(json.dumps(rules, ensure_ascii=False), encoding="utf-8")
+            migrated = WIP.load_rules(root)
+            targets = {item["id"]: item["target"] for item in migrated["categories"]}
+            self.assertEqual("AT. VAT", targets["vat"])
+            self.assertEqual("AT. SAOKE", targets["bank_statements"])
+            self.assertEqual("Custom sales target", targets["commerce"])
 
     def test_scan_is_index_only_and_dashboard_is_generated(self):
         with tempfile.TemporaryDirectory() as temporary:

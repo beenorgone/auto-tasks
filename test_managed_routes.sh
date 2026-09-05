@@ -24,11 +24,13 @@ VAT_FILE="iv-mtt-batch1-20260819-000000.xlsx"
 SHOPEE_FILE="Order.all.20260701_20260731.xlsx"
 GHTK_FILE="GHTK_bao_cao_test.xlsx"
 RECON_FILE="bien_ban_doi_soat_test.xlsx"
+SAOKE_FILE="11090087_SAOKE_TK_202608.pdf"
 
 printf 'vat report' >"${YEAR_ROOT}/${VAT_FILE}"
 printf 'shopee report' >"${YEAR_ROOT}/${SHOPEE_FILE}"
 printf 'ghtk report' >"${YEAR_ROOT}/${GHTK_FILE}"
 printf 'reconciliation report' >"${YEAR_ROOT}/${RECON_FILE}"
+printf 'bank statement' >"${YEAR_ROOT}/${SAOKE_FILE}"
 
 mkdir -p "${YEAR_ROOT}/AT.GHTK reports"
 printf 'pre-existing file with the same name' >"${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}"
@@ -51,8 +53,10 @@ run_organizer --plan-managed-rules
 [ -f "${YEAR_ROOT}/${SHOPEE_FILE}" ] || fail "plan mode moved Shopee file"
 [ -f "${YEAR_ROOT}/${GHTK_FILE}" ] || fail "plan mode moved GHTK file"
 [ -f "${YEAR_ROOT}/${RECON_FILE}" ] || fail "plan mode moved reconciliation file"
-[ ! -d "${YEAR_ROOT}/AT.VAT" ] || fail "plan mode created AT.VAT"
-[ ! -d "${YEAR_ROOT}/AT.Shopee reports" ] || fail "plan mode created AT.Shopee reports"
+[ -f "${YEAR_ROOT}/${SAOKE_FILE}" ] || fail "plan mode moved SAOKE file"
+[ -d "${YEAR_ROOT}/AT.GHTK reports" ] || fail "plan mode renamed a managed folder"
+[ ! -d "${YEAR_ROOT}/AT. VAT" ] || fail "plan mode created AT. VAT"
+[ ! -d "${YEAR_ROOT}/AT. Shopee reports" ] || fail "plan mode created AT. Shopee reports"
 content=$(cat "${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}")
 [ "$content" = "pre-existing file with the same name" ] || fail "plan mode altered pre-existing collision file"
 echo "OK: plan mode is read-only"
@@ -65,14 +69,16 @@ run_organizer --apply-managed-rules
 [ ! -e "${YEAR_ROOT}/${GHTK_FILE}" ] || fail "GHTK file still present in year root after apply"
 [ ! -e "${YEAR_ROOT}/${RECON_FILE}" ] || fail "reconciliation file still present in year root after apply"
 
-[ -f "${YEAR_ROOT}/AT.VAT/${VAT_FILE}" ] || fail "VAT file not routed to AT.VAT"
-[ -f "${YEAR_ROOT}/AT.Shopee reports/${SHOPEE_FILE}" ] || fail "Shopee file not routed to AT.Shopee reports"
-[ -f "${YEAR_ROOT}/AT.GHTK reports/${RECON_FILE}" ] || fail "reconciliation file not routed to AT.GHTK reports"
+[ ! -d "${YEAR_ROOT}/AT.GHTK reports" ] || fail "legacy managed folder was not renamed"
+[ -f "${YEAR_ROOT}/AT. VAT/${VAT_FILE}" ] || fail "VAT file not routed to AT. VAT"
+[ -f "${YEAR_ROOT}/AT. Shopee reports/${SHOPEE_FILE}" ] || fail "Shopee file not routed to AT. Shopee reports"
+[ -f "${YEAR_ROOT}/AT. GHTK reports/${RECON_FILE}" ] || fail "reconciliation file not routed to AT. GHTK reports"
+[ -f "${YEAR_ROOT}/AT. SAOKE/${SAOKE_FILE}" ] || fail "SAOKE file not routed to AT. SAOKE"
 
-content=$(cat "${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}")
+content=$(cat "${YEAR_ROOT}/AT. GHTK reports/${GHTK_FILE}")
 [ "$content" = "pre-existing file with the same name" ] || fail "collision overwrote the pre-existing GHTK file"
 
-sha_named=$(find "${YEAR_ROOT}/AT.GHTK reports" -maxdepth 1 -type f -name "GHTK_bao_cao_test_*.xlsx")
+sha_named=$(find "${YEAR_ROOT}/AT. GHTK reports" -maxdepth 1 -type f -name "GHTK_bao_cao_test_*.xlsx")
 [ -n "$sha_named" ] || fail "colliding GHTK file was not renamed with a SHA-256 suffix"
 moved_content=$(cat "$sha_named")
 [ "$moved_content" = "ghtk report" ] || fail "SHA-suffixed file does not contain the moved source content"
@@ -80,7 +86,7 @@ echo "OK: apply mode routed all four files, collision handled with SHA-256 suffi
 
 echo "== idempotency: a second apply run must not error or reprocess moved files =="
 run_organizer --apply-managed-rules
-[ -f "${YEAR_ROOT}/AT.VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
+[ -f "${YEAR_ROOT}/AT. VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
 echo "OK: second apply run is idempotent"
 
 echo "== junk .log cleanup: dry-run preserves, a normal run deletes =="

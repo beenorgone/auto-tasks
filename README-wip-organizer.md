@@ -18,10 +18,10 @@ The generated state is outside this repository at:
 - `../2026/.wip/rules.json` — editable deterministic classification rules
 - `../2026/.wip/dashboard.html` — Material-style Kanban board
 
-The default scan indexes root-level files plus managed `AT.` folders for GHTK,
-B2, VAT, Shopee reports, QC reports, sourcing contracts, and invoice intake;
+The default scan indexes root-level files plus managed `AT. ` folders for GHTK,
+B2, VAT, Shopee reports, SAOKE, QC reports, sourcing contracts, and invoice intake;
 it also scans `WIP ke toan thue`, `Review Label`, the CUC dossier, and product
-self-declaration dossier. The `AT.` prefix identifies folders maintained by
+self-declaration dossier. The `AT. ` prefix identifies folders maintained by
 automation rules. Personal book collections and PDF conversion artefacts are
 excluded by policy.
 

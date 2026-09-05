@@ -9,6 +9,7 @@ person can approve a dossier before any future filing automation is enabled.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import hashlib
 import html
@@ -26,13 +27,14 @@ DOCUMENTS_ROOT = TOOL_ROOT.parent
 YEAR_ROOT = DOCUMENTS_ROOT / "2026"
 STATE_DIR_NAME = ".wip"
 DEFAULT_SCOPES = (
-    "AT.GHTK reports",
-    "AT.B2",
-    "AT.VAT",
-    "AT.Shopee reports",
-    "AT.QC reports",
-    "AT.Sourcing contracts",
-    "AT.Invoice intake",
+    "AT. GHTK reports",
+    "AT. B2",
+    "AT. VAT",
+    "AT. Shopee reports",
+    "AT. QC reports",
+    "AT. Sourcing contracts",
+    "AT. Invoice intake",
+    "AT. SAOKE",
     "WIP ke toan thue",
     "Review Label",
     "ho so danh gia CUC 20260421",
@@ -42,7 +44,7 @@ WIP_DIRECTORIES = ("00_INBOX", "10_WIP", "90_NEEDS_REVIEW", "91_TECH_QUARANTINE"
 VALID_STATUSES = ("captured", "auto_classified", "needs_review", "in_progress", "waiting_external", "approved", "filed", "archived")
 
 DEFAULT_RULES = {
-    "version": 2,
+    "version": 3,
     "excluded_paths": [
         "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
         ".wip/**", "00_INBOX/.*/**",
@@ -51,18 +53,21 @@ DEFAULT_RULES = {
     "categories": [
         {"id": "vat", "label": "VAT", "confidence": 0.98,
          "patterns": [r"iv-mtt-batch"],
-         "target": "AT.VAT", "route_mode": "managed_move"},
+         "target": "AT. VAT", "route_mode": "managed_move"},
         {"id": "shopee_reports", "label": "Shopee reports", "confidence": 0.96,
-         "patterns": [r"(?:^|/)at\.shopee reports(?:/|$)", r"order\."],
-         "target": "AT.Shopee reports", "route_mode": "managed_move"},
+         "patterns": [r"(?:^|/)at\. ?shopee reports(?:/|$)", r"order\."],
+         "target": "AT. Shopee reports", "route_mode": "managed_move"},
         {"id": "ghtk_reports", "label": "GHTK reports", "confidence": 0.97,
-         "patterns": [r"(?:^|/)at\.ghtk reports(?:/|$)", r"ghtk_", r"bien_ban_doi_soat"],
-         "target": "AT.GHTK reports", "route_mode": "managed_move"},
+         "patterns": [r"(?:^|/)at\. ?ghtk reports(?:/|$)", r"ghtk_", r"bien_ban_doi_soat"],
+         "target": "AT. GHTK reports", "route_mode": "managed_move"},
+        {"id": "bank_statements", "label": "SAOKE", "confidence": 0.98,
+         "patterns": [r"sao ?ke"],
+         "target": "AT. SAOKE", "route_mode": "managed_move"},
         {"id": "finance_ops", "label": "Finance & Operations", "confidence": 0.94,
          "patterns": [r"(?:^|/)(?:wip ke toan thue|acb saoke)(?:/|$)", r"c[oô]ng n[oợ]", r"chi[_ -]?tiet[_ -]?cong[_ -]?no", r"sao ?ke", r"so_tien_gui", r"h[oó]a[- ]?d[oơ]n", r"invoice", r"\bunc\b"],
          "target": "IVAR/Accounting - Ke toan/Data - Du lieu"},
         {"id": "quality_regulatory", "label": "Quality & Regulatory", "confidence": 0.93,
-         "patterns": [r"(?:^|/)at\.qc reports(?:/|$)", r"tự công bố", r"ho so danh gia cuc", r"\bcoa\b", r"\bqcvn\b", r"attp", r"ki[eể]m nghi[eệ]m", r"ssop", r"chứng nh[aậ]n", r"c[oô]ng b[oố]"],
+         "patterns": [r"(?:^|/)at\. ?qc reports(?:/|$)", r"tự công bố", r"ho so danh gia cuc", r"\bcoa\b", r"\bqcvn\b", r"attp", r"ki[eể]m nghi[eệ]m", r"ssop", r"chứng nh[aậ]n", r"c[oô]ng b[oố]"],
          "target": "IVAR/QC - Quan ly chat luong"},
         {"id": "packaging", "label": "Packaging & Product Artwork", "confidence": 0.92,
          "patterns": [r"review label", r"\blabel\b", r"sachet", r"\bbox\b", r"bao b[iì]", r"in an"],
@@ -74,13 +79,56 @@ DEFAULT_RULES = {
          "patterns": [r"h[oợ]p d[oồ]ng", r"u[yỷ][ _-]?quy[eề]n", r"dkkd", r"bhxh", r"v[ăa]n ph[oò]ng", r"sepay", r"vietnam bank", r"vietinbank"],
          "target": "IVAR/Legal - Phap ly"},
         {"id": "sourcing_logistics", "label": "Sourcing & Logistics", "confidence": 0.94,
-         "patterns": [r"(?:^|/)at\.sourcing contracts(?:/|$)", r"^hbl-", r"bill of lading", r"packing list", r"v[aậ]n đơn"],
+         "patterns": [r"(?:^|/)at\. ?sourcing contracts(?:/|$)", r"^hbl-", r"bill of lading", r"packing list", r"v[aậ]n đơn"],
          "target": "IVAR/Sourcing - Nhap hang/Logistics"},
         {"id": "technical", "label": "Technical / Quarantine", "confidence": 0.97,
          "patterns": [r"\.(?:log|deb|dmg|tar\.gz)$", r"^log\.", r"(?:^|/)(?:plugin codes|code)(?:/|$)", r"^new\.html$"],
          "target": "2026/91_TECH_QUARANTINE"},
     ],
 }
+
+MANAGED_TARGETS = {
+    "vat": ("AT.VAT", "AT. VAT"),
+    "shopee_reports": ("AT.Shopee reports", "AT. Shopee reports"),
+    "ghtk_reports": ("AT.GHTK reports", "AT. GHTK reports"),
+}
+
+
+def migrate_rules(rules: dict) -> tuple[dict, bool]:
+    """Upgrade only known defaults without overwriting user-defined rules."""
+    migrated = copy.deepcopy(rules)
+    changed = False
+    categories = migrated.get("categories")
+    if not isinstance(categories, list):
+        return migrated, changed
+
+    legacy_patterns = {
+        r"(?:^|/)at\.shopee reports(?:/|$)": r"(?:^|/)at\. ?shopee reports(?:/|$)",
+        r"(?:^|/)at\.ghtk reports(?:/|$)": r"(?:^|/)at\. ?ghtk reports(?:/|$)",
+        r"(?:^|/)at\.qc reports(?:/|$)": r"(?:^|/)at\. ?qc reports(?:/|$)",
+        r"(?:^|/)at\.sourcing contracts(?:/|$)": r"(?:^|/)at\. ?sourcing contracts(?:/|$)",
+    }
+    known_ids = {category.get("id") for category in categories if isinstance(category, dict)}
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        target_pair = MANAGED_TARGETS.get(category.get("id"))
+        if target_pair and category.get("target") == target_pair[0]:
+            category["target"] = target_pair[1]
+            changed = True
+        patterns = category.get("patterns")
+        if isinstance(patterns, list):
+            updated_patterns = [legacy_patterns.get(pattern, pattern) for pattern in patterns]
+            if updated_patterns != patterns:
+                category["patterns"] = updated_patterns
+                changed = True
+
+    if "bank_statements" not in known_ids:
+        bank_rule = next(item for item in DEFAULT_RULES["categories"] if item["id"] == "bank_statements")
+        insert_at = next((index for index, item in enumerate(categories) if item.get("id") == "finance_ops"), len(categories))
+        categories.insert(insert_at, copy.deepcopy(bank_rule))
+        changed = True
+    return migrated, changed
 
 
 def state_dir(year_root: Path) -> Path:
@@ -103,6 +151,8 @@ def ensure_state(year_root: Path) -> tuple[Path, Path]:
     rule_file = rules_path(year_root)
     if not rule_file.exists():
         rule_file.write_text(json.dumps(DEFAULT_RULES, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    else:
+        load_rules(year_root)
     return db_path(year_root), rule_file
 
 
@@ -160,8 +210,12 @@ def normalized(value: str) -> str:
 
 
 def load_rules(year_root: Path) -> dict:
-    with rules_path(year_root).open(encoding="utf-8") as handle:
-        return json.load(handle)
+    rule_file = rules_path(year_root)
+    with rule_file.open(encoding="utf-8") as handle:
+        rules, changed = migrate_rules(json.load(handle))
+    if changed:
+        rule_file.write_text(json.dumps(rules, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return rules
 
 
 def is_generated(path: Path, rules: dict) -> bool:

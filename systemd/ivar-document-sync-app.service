@@ -1,0 +1,12 @@
+[Unit]
+Description=IVAR Document Sync local control panel
+
+[Service]
+Type=simple
+WorkingDirectory=/home/beenorgone/Documents/.auto-tasks
+ExecStart=/usr/bin/python3 /home/beenorgone/Documents/.auto-tasks/doc-sync-app.py --port 8787
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

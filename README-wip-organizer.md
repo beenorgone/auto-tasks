@@ -50,3 +50,24 @@ python3 wip-organizer.py dashboard
 
 Filing to project folders is intentionally a later phase requiring an
 explicit approval workflow and copy/hash verification.
+
+## Local Document Sync app
+
+Start the Material-style local control panel with:
+
+```bash
+python3 doc-sync-app.py --open
+```
+
+It binds only to `127.0.0.1:8787`. Use **Preview routing** first; it cannot
+move, rename, or sync files. **Apply changes** runs the existing approved
+managed routes. The rclone project sync remains off unless explicitly checked.
+
+The included user service starts the app at login. Install it once from this
+repository, then enable it:
+
+```bash
+cp systemd/ivar-document-sync-app.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ivar-document-sync-app.service
+```

@@ -3,8 +3,8 @@
 
 Pipeline:  fetch  ->  build  ->  send
   fetch  collects album metadata, captions and images into a work directory
-         (Graph API, a logged-in Playwright browser profile, or a Facebook
-         "Download your information" export).
+         (Graph API, a logged-in Playwright browser profile, a JSON file saved
+         by the bookmarklet, or a Facebook "Download your information" export).
   build  writes an EPUB 3 (Kindle's preferred format) and/or a PDF.
   send   mails the ebook to a Send-to-Kindle address over SMTP.
 
@@ -37,6 +37,8 @@ from typing import Any, Callable, Iterable
 APP_ROOT = Path(__file__).resolve().parent
 DEFAULT_WORK_ROOT = APP_ROOT / "fb-ebooks"
 DEFAULT_PROFILE_DIR = Path.home() / ".cache" / "fb-album-ebook" / "browser-profile"
+BOOKMARKLET_SOURCE = APP_ROOT / "fb-album-bookmarklet.js"
+BOOKMARKLET_FORMAT = "fb-album-bookmarklet/1"
 GRAPH_VERSION = "v21.0"
 KINDLE_MAX_BYTES = 50 * 1024 * 1024
 USER_AGENT = (
@@ -302,6 +304,71 @@ def load_export(path: Path, album_hint: str = "") -> Album:
             )
         return album
     raise FileNotFoundError(f"No album JSON matching {album_hint!r} under {path}")
+
+
+def load_bookmarklet(path: Path) -> Album:
+    """Read the JSON the bookmarklet downloads (fb-album-<id>.json)."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("format") != BOOKMARKLET_FORMAT:
+        raise SystemExit(f"{path} is not a bookmarklet export (format {data.get('format')!r})")
+    meta = data.get("album") or {}
+    album = Album(id=str(meta["id"]), title=meta.get("title", ""), source_url=meta.get("source_url", ""))
+    for item in data.get("photos", []):
+        album.photos.append(
+            Photo(
+                id=str(item["id"]),
+                caption=item.get("caption", ""),
+                created_time=item.get("created_time", ""),
+                image_url=item.get("image_url", ""),
+            )
+        )
+    if not data.get("complete"):
+        log(f"Note: {path.name} is a partial run ({len(album.photos)} photos); run the bookmarklet again to continue.")
+    return album
+
+
+def merge_album(existing: Album, incoming: Album) -> Album:
+    """Merge a new bookmarklet run into an earlier one, keeping downloaded files and order."""
+    by_id = {photo.id: photo for photo in existing.photos}
+    for photo in incoming.photos:
+        old = by_id.get(photo.id)
+        if old is None:
+            existing.photos.append(photo)
+            by_id[photo.id] = photo
+            continue
+        old.image_url = photo.image_url or old.image_url  # fbcdn links expire: keep the fresh one
+        old.caption = photo.caption or old.caption
+        old.created_time = photo.created_time or old.created_time
+    existing.title = incoming.title or existing.title
+    existing.source_url = incoming.source_url or existing.source_url
+    return existing
+
+
+def bookmarklet_url(source: Path = BOOKMARKLET_SOURCE) -> str:
+    """Inline the shared photo reader into the template and pack it as a javascript: URL."""
+    code = source.read_text(encoding="utf-8").replace("__PHOTO_DETAIL_JS__", PHOTO_DETAIL_JS.strip())
+    lines = [line.strip() for line in code.splitlines()]
+    code = "\n".join(line for line in lines if line and not line.startswith("//"))
+    return "javascript:" + urllib.parse.quote(code, safe="")
+
+
+def write_bookmarklet_page(target: Path) -> Path:
+    url = bookmarklet_url()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "<!doctype html><meta charset=\"utf-8\"><title>FB album → Ebook bookmarklet</title>\n"
+        "<body style=\"font:16px/1.5 system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px\">\n"
+        "<h1>FB album → Ebook</h1>\n"
+        "<p>Kéo nút dưới đây lên thanh bookmark (Ctrl+Shift+B để hiện thanh bookmark):</p>\n"
+        f"<p><a href=\"{html.escape(url, quote=True)}\" style=\"display:inline-block;padding:8px 14px;"
+        "background:#1877f2;color:#fff;border-radius:6px;text-decoration:none\">📚 FB → Ebook</a></p>\n"
+        "<ol><li>Mở ảnh đầu tiên của album trên Facebook.</li>\n"
+        "<li>Bấm bookmark, rồi bấm <b>Bắt đầu</b>. Giữ tab mở; mỗi ảnh chờ 20–60 giây.</li>\n"
+        "<li>Khi xong hoặc dừng, file <code>fb-album-&lt;id&gt;.json</code> được tải về.</li>\n"
+        "<li><code>python3 fb-album-ebook.py run ~/Downloads/fb-album-&lt;id&gt;.json --source bookmarklet</code></li></ol>\n",
+        encoding="utf-8",
+    )
+    return target
 
 
 def read_file_url(url: str) -> bytes:
@@ -770,6 +837,15 @@ def command_fetch(args: argparse.Namespace) -> Path:
         album.save(work_dir)
         download_images(album, work_dir, args.max_image_side, getter=read_file_url)
         return work_dir
+    if args.source == "bookmarklet":
+        album = load_bookmarklet(Path(args.album))
+        work_dir = resolve_work_dir(args, album.id)
+        if (work_dir / "album.json").exists():
+            album = merge_album(Album.load(work_dir), album)
+        album.save(work_dir)
+        download_images(album, work_dir, args.max_image_side)
+        log(f"Album saved to {work_dir}")
+        return work_dir
     album_id = parse_album_id(args.album)
     work_dir = resolve_work_dir(args, album_id)
     if args.source == "graph":
@@ -826,8 +902,9 @@ def add_build_options(parser: argparse.ArgumentParser) -> None:
 
 
 def add_fetch_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("album", help="album URL / id; for --source export: export folder or album JSON")
-    parser.add_argument("--source", choices=["browser", "graph", "export"], default="browser")
+    parser.add_argument("album", help="album URL / id; --source export: export folder or album JSON; "
+                        "--source bookmarklet: the downloaded fb-album-<id>.json")
+    parser.add_argument("--source", choices=["browser", "graph", "export", "bookmarklet"], default="browser")
     parser.add_argument("--work-dir", help=f"default: {DEFAULT_WORK_ROOT}/<album id>")
     parser.add_argument("--token", help="Graph API access token (or FB_ACCESS_TOKEN)")
     parser.add_argument("--profile", default=str(DEFAULT_PROFILE_DIR), help="browser profile dir")
@@ -845,6 +922,10 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     login = sub.add_parser("login", help="open a browser window to log in to Facebook once")
     login.add_argument("--profile", default=str(DEFAULT_PROFILE_DIR))
+
+    bookmarklet = sub.add_parser("bookmarklet", help="write the bookmarklet install page")
+    bookmarklet.add_argument("--output", default=str(DEFAULT_WORK_ROOT / "bookmarklet.html"))
+    bookmarklet.add_argument("--print", action="store_true", help="print the javascript: URL instead")
 
     fetch = sub.add_parser("fetch", help="download album metadata, captions and images")
     add_fetch_options(fetch)
@@ -866,6 +947,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.command == "login":
         browser_login(Path(args.profile))
+    elif args.command == "bookmarklet":
+        if args.print:
+            print(bookmarklet_url())
+        else:
+            log(f"Open {write_bookmarklet_page(Path(args.output)).resolve().as_uri()} and drag the button to the bookmarks bar")
     elif args.command == "fetch":
         command_fetch(args)
     elif args.command == "build":

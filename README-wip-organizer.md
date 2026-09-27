@@ -59,9 +59,19 @@ Start the Material-style local control panel with:
 python3 doc-sync-app.py --open
 ```
 
-It binds only to `127.0.0.1:8787`. Use **Preview routing** first; it cannot
-move, rename, or sync files. **Apply changes** runs the existing approved
-managed routes. The rclone project sync remains off unless explicitly checked.
+It binds only to `127.0.0.1:8787` and reuses `wip-organizer.py` as the single
+source of classification rules. **Preview routing** forces organizer dry-run,
+disables rclone, then refreshes the WIP index and Kanban dashboard. Source
+documents are not moved, renamed, copied, or deleted during preview.
+
+Use **Refresh Kanban** to index root-level files and the configured WIP scopes
+without running the accounting organizer. **Open Kanban** serves the generated
+dashboard from the local app. Categories marked `review_only` are displayed for
+human review and are never moved by DocSync.
+
+**Apply changes** runs only the approved `managed_move` routes, refreshes the
+WIP index and dashboard afterward, and keeps the rclone project sync off unless
+it is explicitly checked.
 
 The included user service starts the app at login. Install it once from this
 repository, then enable it:

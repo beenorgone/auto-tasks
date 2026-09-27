@@ -3,3 +3,8 @@ playwright-cli/
 __pycache__/
 *.py[cod]
 fb-ebooks/
+manga-ebooks/
+gmail_brief/credentials.json
+gmail_brief/tokens/
+gmail_brief/.env
+gmail_brief/briefs/

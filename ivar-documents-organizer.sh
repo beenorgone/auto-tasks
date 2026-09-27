@@ -114,6 +114,14 @@ if [ "$PLAN_MANAGED_RULES" -eq 1 ] && [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
   exit 1
 fi
 
+# Planning is a source-document read-only contract even when the caller forgets
+# to combine it with --dry-run/--no-sync. Local logs and WIP index state may
+# still be refreshed, but no source file may be moved, copied, renamed or deleted.
+if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
+  DRY_RUN=1
+  NO_SYNC=1
+fi
+
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/${CURRENT_DATE}.log"
 

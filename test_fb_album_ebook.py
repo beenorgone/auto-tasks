@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.parse
 import xml.dom.minidom
 import zipfile
 from pathlib import Path
@@ -102,6 +103,39 @@ class SourceTests(unittest.TestCase):
             APP.download_images(album, work, 0, getter=APP.read_file_url)
             self.assertTrue((work / album.photos[0].file).exists())
             self.assertEqual("Mô tả", APP.Album.load(work).photos[0].caption)
+
+    def test_bookmarklet_runs_merge_and_keep_downloaded_files(self):
+        def export(photos, complete):
+            return {"format": APP.BOOKMARKLET_FORMAT, "complete": complete,
+                    "album": {"id": "999", "title": "Công thức", "source_url": "https://fb/set"},
+                    "photos": [{"id": i, "caption": c, "created_time": "", "image_url": u} for i, c, u in photos]}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            first = Path(temporary) / "part1.json"
+            first.write_text(json.dumps(export([("1", "Bài 1", "u1"), ("2", "", "u2")], False)), encoding="utf-8")
+            second = Path(temporary) / "part2.json"
+            second.write_text(json.dumps(export([("2", "", "u2-fresh"), ("3", "Bài 2", "u3")], True)), encoding="utf-8")
+            work = Path(temporary) / "work"
+
+            album = APP.load_bookmarklet(first)
+            APP.download_images(album, work, 0, getter=lambda url: TINY_JPEG)
+            merged = APP.merge_album(APP.Album.load(work), APP.load_bookmarklet(second))
+            self.assertEqual(["1", "2", "3"], [p.id for p in merged.photos])
+            self.assertEqual("u2-fresh", merged.photos[1].image_url)
+            self.assertEqual("images/0002.jpg", merged.photos[1].file)
+            self.assertEqual("", merged.photos[2].file)
+
+            first.write_text(json.dumps({"format": "other"}), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                APP.load_bookmarklet(first)
+
+    def test_bookmarklet_url_inlines_shared_photo_reader(self):
+        url = APP.bookmarklet_url()
+        self.assertTrue(url.startswith("javascript:"))
+        code = urllib.parse.unquote(url[len("javascript:"):])
+        self.assertNotIn("__PHOTO_DETAIL_JS__", code)
+        self.assertIn('data-visualcompletion="media-vc-image"', code)
+        self.assertIn("DELAY_MIN = 20, DELAY_MAX = 60", code)
 
 
 class BuildTests(unittest.TestCase):

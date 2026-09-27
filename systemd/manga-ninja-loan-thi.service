@@ -1,0 +1,13 @@
+[Unit]
+Description=Resume Ninja Loan Thi chapter PDF queue
+ConditionPathExists=/home/beenorgone/Documents/.auto-tasks/manga-ebooks/ninja-loan-thi-links.txt
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/beenorgone/Documents/.auto-tasks
+ExecStart=/usr/bin/python3 -u /home/beenorgone/Documents/.auto-tasks/manga-chapter-pdf.py queue --file /home/beenorgone/Documents/.auto-tasks/manga-ebooks/ninja-loan-thi-links.txt --max-new 5 --delay 2 --chapter-delay 10
+StandardOutput=append:/home/beenorgone/Documents/.auto-tasks/manga-ebooks/ninja-loan-thi-queue.log
+StandardError=append:/home/beenorgone/Documents/.auto-tasks/manga-ebooks/ninja-loan-thi-queue.log
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

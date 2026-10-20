@@ -1,5 +1,7 @@
 # 2026 WIP Organizer
 
+Hướng dẫn sử dụng tiếng Việt: [GUIDE-DOCSYNC.md](GUIDE-DOCSYNC.md).
+
 `wip-organizer.py` indexes proposed classifications for Documents/2026 and
 renders a local Kanban dashboard. It has no command that moves, copies,
 renames, deletes, or files a source document.
@@ -69,7 +71,7 @@ without running the accounting organizer. **Open Kanban** serves the generated
 dashboard from the local app. Categories marked `review_only` are displayed for
 human review and are never moved by DocSync.
 
-**Apply changes** runs only the approved `managed_move` routes, refreshes the
+**Apply changes** runs approved `managed_move` routes and existing accounting handlers, refreshes the
 WIP index and dashboard afterward, and keeps the rclone project sync off unless
 it is explicitly checked.
 
@@ -80,4 +82,79 @@ repository, then enable it:
 cp systemd/ivar-document-sync-app.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now ivar-document-sync-app.service
+```
+
+## DocSync CLI and service health
+
+Install the small XLS reader environment and CLI entry point:
+
+```bash
+uv venv .venv-docsync
+uv pip install --python .venv-docsync/bin/python -r requirements-docsync.txt
+ln -s "$PWD/docsync" "$HOME/.local/bin/docsync"
+```
+
+If an older `docsync` shell alias exists, point it at this checkout's `docsync`
+launcher and reload that alias. Bare `docsync` now displays the Kanban board.
+
+```bash
+docsync                 # same as docsync board; reads the current queue
+docsync board --stage ready --limit 0  # all cards ready for managed routing
+docsync status          # watcher, timer, last completion, next run, recent log
+docsync rules           # category IDs and automatic/review-only routing modes
+docsync scan            # refresh index and HTML Kanban without moving documents
+docsync board --json    # machine-readable cards, reasons, targets and next actions
+docsync review DOSSIER_ID legal_corporate --note 'Confirmed legal dossier'
+docsync set-status DOSSIER_ID waiting_external
+docsync preview         # preview routing; no external sync
+docsync apply           # apply managed routes and existing accounting handlers
+docsync apply --sync-project  # explicitly include external rclone sync
+```
+
+Board columns: **Chờ duyệt → Đang xử lý → Chờ bên ngoài → Sẵn sàng chuyển →
+Đã lưu hồ sơ → Lưu trữ**. Each card shows its reason, proposed destination,
+dossier ID and next action. `review_only` decisions remain manual filing work;
+marking a dossier approved does not enable automatic moves. Manual decisions
+survive subsequent scans while the file content remains unchanged. Changed
+content is classified again. The board reflects indexed scopes plus live direct
+files in the current-year root. Run `scan` to discover new nested WIP files.
+
+The shell organizer enables managed rules by default for normal runs, including
+legacy invocations through the Tools symlink. UI, CLI, timer and watcher use the
+same organizer and a shared `flock`; a competing run exits 75 (busy) before any
+processing. Watcher busy/error results remain queued for retry.
+
+The watcher inspects only direct intake files in the current-year root,
+Documents and Downloads every 5 seconds. It waits for 20 seconds of stability,
+uses a 60-second cooldown and ignores temporary downloads. It supports all
+file types handled by the organizer, not only PDFs. Existing files at watcher
+startup wait for the regular timer or an explicit apply. Watcher runs use
+`--no-sync`; the existing six-hour timer retains its project-sync behavior.
+
+Deploy service definitions with:
+
+```bash
+cp systemd/ivar-watcher.service systemd/ivar-documents-organizer.service systemd/ivar-document-sync-app.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user reset-failed ivar-watcher.service
+systemctl --user enable ivar-watcher.service
+systemctl --user restart ivar-watcher.service
+systemctl --user restart ivar-document-sync-app.service
+```
+
+The web overview caches health and queue reads for 30 seconds. Source filenames
+are rendered as text. No browser request can select a systemd unit or shell
+command. Watcher output goes to the journal with bounded restart attempts.
+
+Rules v8 add company VAT batches and dated `orders_` exports. Generic transaction
+workbooks require bank/account/balance header evidence before automatic routing.
+Unreadable, oversized or unsupported workbooks remain for review. XLS verification
+requires the pinned `xlrd` dependency; XLSX inspection uses bounded ZIP/XML reads.
+Personal education programs no longer match Commerce on “Chương trình” alone.
+
+Validation:
+
+```bash
+.venv-docsync/bin/python -m unittest -q test_doc_sync_app.py test_wip_organizer.py test_docsync.py
+sh test_managed_routes.sh
 ```

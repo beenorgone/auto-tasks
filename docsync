@@ -1,0 +1,6 @@
+#!/bin/sh
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+if [ -x "$SCRIPT_DIR/.venv-docsync/bin/python" ]; then
+  exec "$SCRIPT_DIR/.venv-docsync/bin/python" "$SCRIPT_DIR/docsync.py" "$@"
+fi
+exec python3 "$SCRIPT_DIR/docsync.py" "$@"

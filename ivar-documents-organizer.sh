@@ -7,7 +7,11 @@
 
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd)
+if [ -d "${SCRIPT_DIR}/.venv-docsync/bin" ]; then
+  PATH="${SCRIPT_DIR}/.venv-docsync/bin:$PATH"
+  export PATH
+fi
 WIP_ORGANIZER_PY="${WIP_ORGANIZER_PY:-${SCRIPT_DIR}/wip-organizer.py}"
 HOME_DIR=${HOME:-/home/beenorgone}
 DOCS_ROOT="${HOME_DIR}/Documents"
@@ -120,9 +124,18 @@ fi
 if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
   DRY_RUN=1
   NO_SYNC=1
+elif [ "$RESCAN_MODE" -eq 0 ] && [ "$RESCAN_UNC_MODE" -eq 0 ] && [ "$VENDOR_LIST_MODE" -eq 0 ]; then
+  APPLY_MANAGED_RULES=1
 fi
 
 mkdir -p "$LOG_DIR"
+# All callers (CLI, web, timer, watcher) share this advisory lock. Never unlink
+# it: replacing the inode would let a second process bypass a held lock.
+exec 9>"${STATE_DIR}/organizer.lock"
+if ! flock -n 9; then
+  printf 'BUSY: another DocSync run holds the organizer lock; retry later.\n' >&2
+  exit 75
+fi
 LOG_FILE="${LOG_DIR}/${CURRENT_DATE}.log"
 
 log_line() {
@@ -132,7 +145,7 @@ log_line() {
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
   printf '%s [%s] %s\n' "$timestamp" "$level" "$message" >>"$LOG_FILE"
   if [ "$QUIET" -eq 0 ]; then
-    printf '%s [%s] %s\n' "$timestamp" "$level" "$message"
+    printf '%s [%s] %s\n' "$timestamp" "$level" "$message" >&2
   fi
 }
 
@@ -1840,7 +1853,7 @@ process_general_bucket() {
   file_size=$3
   sha=$4
   if [ "$CURRENT_DAY" != "01" ] && [ "$DEEP_MODE" -ne 1 ]; then
-    info "No special rule matched; keeping file in place: $source_path"
+    info "Kept in place (monthly grouping waits for day 01 or --deep): $source_path"
     return 0
   fi
   bucket=$(classify_general_bucket "$source_path")
@@ -2053,12 +2066,16 @@ route_and_apply_managed_file() {
 
   base=$(basename "$source_path")
   require_command python3
-  route_line=$(python3 "$WIP_ORGANIZER_PY" route --rules "$rules_file" --path "$base" --format tsv 2>/dev/null)
-  route_status=$?
-  if [ "$route_status" -ne 0 ] || [ -z "$route_line" ]; then
+  route_status=0
+  route_line=$(python3 "$WIP_ORGANIZER_PY" route --rules "$rules_file" --path "$base" --source "$source_path" --format tsv) || route_status=$?
+  if [ "$route_status" -eq 3 ]; then
+    info "REVIEW: $source_path [$route_line]"
     return 1
   fi
-
+  if [ "$route_status" -ne 0 ] || [ -z "$route_line" ]; then
+    error "Classifier failed for: $source_path (exit=$route_status)"
+    return 2
+  fi
   category=$(printf '%s' "$route_line" | cut -f1)
   target=$(printf '%s' "$route_line" | cut -f3)
   route_mode=$(printf '%s' "$route_line" | cut -f4)
@@ -2148,8 +2165,12 @@ process_source_file() {
           # Invoice PDF/XML and UNC processing keep their existing higher-priority handlers.
           ;;
         *)
-          if route_and_apply_managed_file "$source_path" "$file_mtime" "$file_size" "$sha"; then
+          managed_status=0
+          route_and_apply_managed_file "$source_path" "$file_mtime" "$file_size" "$sha" || managed_status=$?
+          if [ "$managed_status" -eq 0 ]; then
             return 0
+          elif [ "$managed_status" -eq 2 ]; then
+            exit 1
           fi
           ;;
       esac

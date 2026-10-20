@@ -20,8 +20,8 @@ mkdir -p "$YEAR_ROOT" "$IVAR_DATA_DIR"
 
 python3 "$WIP_PY" --year-root "$YEAR_ROOT" init >/dev/null
 
-VAT_FILE="iv-mtt-batch1-20260819-000000.xlsx"
-SHOPEE_FILE="Order.all.20260701_20260731.xlsx"
+VAT_FILE="iv-company-batch1-20260819-000000.xlsx"
+SHOPEE_FILE="orders_2026-07-01_2026-07-31.xlsx"
 GHTK_FILE="GHTK_bao_cao_test.xlsx"
 RECON_FILE="bien_ban_doi_soat_test.xlsx"
 SAOKE_FILE="11090087_SAOKE_TK_202608.pdf"
@@ -68,7 +68,7 @@ content=$(cat "${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}")
 echo "OK: plan mode is read-only"
 
 echo "== apply mode: must move the four files into their AT.* folders =="
-run_organizer --apply-managed-rules
+run_organizer
 
 [ ! -e "${YEAR_ROOT}/${VAT_FILE}" ] || fail "VAT file still present in year root after apply"
 [ ! -e "${YEAR_ROOT}/${SHOPEE_FILE}" ] || fail "Shopee file still present in year root after apply"

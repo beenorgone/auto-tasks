@@ -14,8 +14,13 @@ import datetime as dt
 import hashlib
 import html
 import json
+import os
+import tempfile
 import re
 import sqlite3
+import unicodedata
+import zipfile
+import xml.etree.ElementTree as ET
 import sys
 from collections import Counter
 from pathlib import Path
@@ -44,7 +49,7 @@ WIP_DIRECTORIES = ("00_INBOX", "10_WIP", "90_NEEDS_REVIEW", "91_TECH_QUARANTINE"
 VALID_STATUSES = ("captured", "auto_classified", "needs_review", "in_progress", "waiting_external", "approved", "filed", "archived")
 
 DEFAULT_RULES = {
-    "version": 3,
+    "version": 8,
     "excluded_paths": [
         "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
         ".wip/**", "00_INBOX/.*/**",
@@ -52,16 +57,16 @@ DEFAULT_RULES = {
     "generated_name_patterns": [r"^pdftohtml", r"^pdftotext", r"^text\.txt$", r"^agents\.md$"],
     "categories": [
         {"id": "vat", "label": "VAT", "confidence": 0.98,
-         "patterns": [r"iv-mtt-batch"],
+         "patterns": [r"iv-(?:mtt|company)-batch"],
          "target": "AT. VAT", "route_mode": "managed_move"},
         {"id": "shopee_reports", "label": "Shopee reports", "confidence": 0.96,
-         "patterns": [r"(?:^|/)at\. ?shopee reports(?:/|$)", r"order\."],
+         "patterns": [r"(?:^|/)at\. ?shopee reports(?:/|$)", r"order\.", r"(?:^|/)orders_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$"],
          "target": "AT. Shopee reports", "route_mode": "managed_move"},
         {"id": "ghtk_reports", "label": "GHTK reports", "confidence": 0.97,
          "patterns": [r"(?:^|/)at\. ?ghtk reports(?:/|$)", r"ghtk_", r"bien_ban_doi_soat"],
          "target": "AT. GHTK reports", "route_mode": "managed_move"},
         {"id": "bank_statements", "label": "SAOKE", "confidence": 0.98,
-         "patterns": [r"sao ?ke"],
+         "patterns": [r"sao ?ke", r"(?:^|/)(?:danh sach giao dich|lich-su-giao-dich).*\.xlsx?$"] ,
          "target": "AT. SAOKE", "route_mode": "managed_move"},
         {"id": "finance_ops", "label": "Finance & Operations", "confidence": 0.94,
          "patterns": [r"(?:^|/)(?:wip ke toan thue|acb saoke)(?:/|$)", r"c[oô]ng n[oợ]", r"chi[_ -]?tiet[_ -]?cong[_ -]?no", r"sao ?ke", r"so_tien_gui", r"h[oó]a[- ]?d[oơ]n", r"invoice", r"\bunc\b"],
@@ -73,7 +78,7 @@ DEFAULT_RULES = {
          "patterns": [r"review label", r"\blabel\b", r"sachet", r"\bbox\b", r"bao b[iì]", r"in an"],
          "target": "IVAR/Manufacturing - San xuat/In an"},
         {"id": "commerce", "label": "Commerce & Sales", "confidence": 0.90,
-         "patterns": [r"b2b", r"shopee", r"b[aả]ng gi[aá]", r"ch[ưu]ơ?ng tr[iì]nh", r"thong bao", r"shop-stats", r"mass_upload"],
+         "patterns": [r"b2b", r"shopee", r"b[aả]ng gi[aá]", r"ch[ưu]ơ?ng tr[iì]nh.*(?:khuy[eế]n m[aã]i|b[aá]n h[aà]ng|d[aạ]i l[yý])", r"thong bao.*(?:gia|dai ly|ban hang)", r"shop-stats", r"mass_upload"],
          "target": "IVAR/Marketing-Sales-CS"},
         {"id": "legal_corporate", "label": "Legal & Corporate", "confidence": 0.88,
          "patterns": [r"h[oợ]p d[oồ]ng", r"u[yỷ][ _-]?quy[eề]n", r"dkkd", r"bhxh", r"v[ăa]n ph[oò]ng", r"sepay", r"vietnam bank", r"vietinbank"],
@@ -127,6 +132,23 @@ def migrate_rules(rules: dict) -> tuple[dict, bool]:
         bank_rule = next(item for item in DEFAULT_RULES["categories"] if item["id"] == "bank_statements")
         insert_at = next((index for index, item in enumerate(categories) if item.get("id") == "finance_ops"), len(categories))
         categories.insert(insert_at, copy.deepcopy(bank_rule))
+        changed = True
+    if migrated.get("version", 0) < 8:
+        replacements = {
+            r"iv-mtt-batch": r"iv-(?:mtt|company)-batch",
+            r"ch[ưu]ơ?ng tr[iì]nh": r"ch[ưu]ơ?ng tr[iì]nh.*(?:khuy[eế]n m[aã]i|b[aá]n h[aà]ng|d[aạ]i l[yý])",
+            r"thong bao": r"thong bao.*(?:gia|dai ly|ban hang)",
+        }
+        defaults = {item["id"]: item for item in DEFAULT_RULES["categories"]}
+        for category in categories:
+            patterns = category.get("patterns", [])
+            # Migrate known patterns only; preserve custom destinations/modes.
+            category["patterns"] = [replacements.get(pattern, pattern) for pattern in patterns]
+            if category.get("id") in {"shopee_reports", "bank_statements"}:
+                extra = defaults[category["id"]]["patterns"][-1]
+                if extra not in category["patterns"]:
+                    category["patterns"].append(extra)
+        migrated["version"] = 8
         changed = True
     return migrated, changed
 
@@ -206,7 +228,7 @@ def digest(path: Path) -> str:
 
 
 def normalized(value: str) -> str:
-    return value.replace("đ", "d").replace("Đ", "D").casefold()
+    return unicodedata.normalize("NFC", value).replace("đ", "d").replace("Đ", "D").casefold()
 
 
 def load_rules(year_root: Path) -> dict:
@@ -214,7 +236,14 @@ def load_rules(year_root: Path) -> dict:
     with rule_file.open(encoding="utf-8") as handle:
         rules, changed = migrate_rules(json.load(handle))
     if changed:
-        rule_file.write_text(json.dumps(rules, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=rule_file.parent, prefix=".rules-", delete=False) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(json.dumps(rules, ensure_ascii=False, indent=2) + "\n")
+                handle.flush()
+                os.replace(temporary, rule_file)
+            finally:
+                temporary.unlink(missing_ok=True)
     return rules
 
 
@@ -231,13 +260,60 @@ def is_excluded(relative: Path, rules: dict) -> bool:
     return False
 
 
-def classify(relative: Path, rules: dict) -> tuple[str, float, str, str | None, str]:
+def bank_evidence(source: Path | None) -> tuple[bool, str]:
+    """Bounded, data-only reads; never execute workbook formulas/macros."""
+    if source is None:
+        return False, "bank content verification required"
+    try:
+        if source.is_symlink() or source.stat().st_size > 10 * 1024 * 1024:
+            return False, "bank verification skipped: symlink or file exceeds 10 MB"
+        cells = []
+        if source.suffix.lower() == ".xls":
+            import xlrd
+            book = xlrd.open_workbook(str(source), on_demand=True)
+            try:
+                for sheet_index in range(min(book.nsheets, 3)):
+                    sheet = book.sheet_by_index(sheet_index)
+                    for row in range(min(sheet.nrows, 100)):
+                        cells.extend(str(sheet.cell_value(row, col)) for col in range(min(sheet.ncols, 30)))
+            finally:
+                book.release_resources()
+        elif source.suffix.lower() == ".xlsx":
+            with zipfile.ZipFile(source) as archive:
+                names = [n for n in archive.namelist() if n == "xl/sharedStrings.xml" or re.match(r"xl/worksheets/sheet[1-3]\.xml$", n)]
+                if sum(archive.getinfo(n).file_size for n in names) > 5 * 1024 * 1024:
+                    return False, "bank verification skipped: expanded workbook exceeds 5 MB"
+                for name in names:
+                    data = archive.read(name)
+                    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+                        return False, "bank verification rejected unsafe XML"
+                    cells.extend(ET.fromstring(data).itertext())
+        else:
+            return False, "bank verification requires XLS/XLSX"
+        text = " ".join(cells).casefold().replace("đ", "d")
+        text = "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
+        bank = re.search(r"vietinbank|vietcombank|techcombank|\bacb\b|\bbidv\b|ngan hang", text)
+        account = re.search(r"so tai khoan|account number|account no|tai khoan", text)
+        balance = re.search(r"so du|balance|ghi no|ghi co|debit|credit", text)
+        return bool(bank and account and balance), "verified bank/account/balance headers" if bank and account and balance else "bank headers not confirmed; review required"
+    except Exception as error:
+        return False, f"bank verification unavailable ({type(error).__name__}); review required"
+
+
+def classify(relative: Path, rules: dict, source: Path | None = None) -> tuple[str, float, str, str | None, str]:
     text = normalized(relative.as_posix())
     for category in rules["categories"]:
         matched = [pattern for pattern in category["patterns"] if re.search(pattern, text, re.I)]
         if matched:
             route_mode = category.get("route_mode", "review_only")
-            return category["id"], float(category["confidence"]), f"rule: {matched[0]}", category["target"], route_mode
+            if category["id"] == "bank_statements" and re.match(r"(?:danh sach giao dich|lich-su-giao-dich)", normalized(relative.name)):
+                valid, detail = bank_evidence(source)
+                if not valid:
+                    return category["id"], 0.5, detail, category["target"], "review_only"
+            reason = f"rule: {matched[0]}"
+            if category["id"] == "bank_statements" and source is not None and re.match(r"(?:danh sach giao dich|lich-su-giao-dich)", normalized(relative.name)):
+                reason += "; verified bank/account/balance headers"
+            return category["id"], float(category["confidence"]), reason, category["target"], route_mode
     return "needs_review", 0.0, "no deterministic rule matched", None, "review_only"
 
 
@@ -315,11 +391,14 @@ def scan(year_root: Path, source_names: list[str], root_files: bool) -> dict[str
         for path in files_for_scan(year_root, sources, root_files, rules):
             stat = path.stat()
             relative = path.relative_to(year_root)
-            prior = conn.execute("SELECT sha256, byte_size, modified_at, status FROM documents WHERE path = ?", (relative.as_posix(),)).fetchone()
+            prior = conn.execute("SELECT * FROM documents WHERE path = ?", (relative.as_posix(),)).fetchone()
             sha = prior["sha256"] if prior and prior["byte_size"] == stat.st_size and prior["modified_at"] == stat.st_mtime_ns else digest(path)
-            category, confidence, reason, target, _route_mode = classify(relative, rules)
-            dossier_id = dossier_for(category, relative, stat.st_mtime)
-            status = prior["status"] if prior and prior["status"] not in {"captured", "auto_classified", "needs_review"} else ("auto_classified" if confidence >= 0.85 else "needs_review")
+            category, confidence, reason, target, _route_mode = classify(relative, rules, path)
+            manual = prior and prior["classification_reason"].startswith("manual review:") and prior["sha256"] == sha
+            if manual:
+                category, confidence, reason, target = prior["category"], prior["confidence"], prior["classification_reason"], prior["proposed_target"]
+            dossier_id = prior["dossier_id"] if manual else dossier_for(category, relative, stat.st_mtime)
+            status = prior["status"] if prior and prior["sha256"] == sha and prior["status"] not in {"captured", "auto_classified", "needs_review"} else ("auto_classified" if confidence >= 0.85 else "needs_review")
             conn.execute(
                 """INSERT INTO documents(path, sha256, byte_size, modified_at, observed_at, category, confidence, classification_reason, proposed_target, dossier_id, status, active)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -380,11 +459,11 @@ def review_dossier(year_root: Path, dossier_id: str, category: str, target: str 
         conn.execute("INSERT INTO events(created_at, event_type, subject, detail) VALUES (?, 'manual_review', ?, ?)", (now, dossier_id, detail))
 
 
-def route_file(rules_file: Path, relative_path: str) -> tuple[str, float, str | None, str, str]:
+def route_file(rules_file: Path, relative_path: str, source: Path | None = None) -> tuple[str, float, str | None, str, str]:
     """Classify a single path against an explicit rules file; makes no file changes."""
     with rules_file.open(encoding="utf-8") as handle:
         rules = json.load(handle)
-    category, confidence, reason, target, route_mode = classify(Path(relative_path), rules)
+    category, confidence, reason, target, route_mode = classify(Path(relative_path), rules, source)
     return category, confidence, target, route_mode, reason
 
 
@@ -474,6 +553,7 @@ def parser() -> argparse.ArgumentParser:
     route = sub.add_parser("route", help="Classify one path against a rules file; makes no file changes")
     route.add_argument("--rules", type=Path, required=True, help="path to a rules.json file")
     route.add_argument("--path", required=True, help="relative path or filename to classify")
+    route.add_argument("--source", type=Path, help="source workbook for bank header verification")
     route.add_argument("--format", choices=("tsv",), default="tsv")
     return result
 
@@ -484,7 +564,7 @@ ROUTE_NOT_APPROVED = 3
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "route":
-        category, confidence, target, route_mode, reason = route_file(args.rules, args.path)
+        category, confidence, target, route_mode, reason = route_file(args.rules, args.path, args.source)
         print("\t".join([category, f"{confidence:g}", target or "", route_mode, reason]))
         return 0 if (route_mode == "managed_move" and target) else ROUTE_NOT_APPROVED
     year_root = args.year_root.resolve()

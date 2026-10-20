@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import http.client
+import threading
 import tempfile
 import time
 import unittest
@@ -81,6 +83,23 @@ if "dashboard" in sys.argv:
         self.assertIn("Open Kanban", markup)
         self.assertIn("Apply managed routes", markup)
         self.assertNotIn("confirm('Apply", markup)
+
+    def test_http_rejects_foreign_host_and_origin(self):
+        server = APP.ThreadingHTTPServer(("127.0.0.1", 0), APP.AppHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for headers, expected in [({}, 200), ({"Host": "attacker.example"}, 403), ({"Origin": "https://attacker.example"}, 403)]:
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+                connection.request("GET", "/api/status", headers=headers)
+                response = connection.getresponse()
+                self.assertEqual(expected, response.status)
+                response.read()
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
     def test_run_request_rejects_invalid_token(self):
         self.assertFalse(APP.secrets.compare_digest("invalid", APP.APP_STATE.csrf_token))

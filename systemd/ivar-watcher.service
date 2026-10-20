@@ -1,0 +1,16 @@
+[Unit]
+Description=DocSync intake watcher
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/.auto-tasks
+ExecStart=/usr/bin/python3 %h/Documents/.auto-tasks/docsync_watcher.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

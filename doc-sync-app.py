@@ -18,6 +18,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from docsync_core import board, health
+import sqlite3
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -42,6 +44,9 @@ class RunState:
         self.wip_script = wip_script
         self.year_root = year_root or DOCUMENTS_ROOT / str(dt.date.today().year)
         self.dashboard_path = self.year_root / ".wip" / "dashboard.html"
+        self.health_cache = {}
+        self.health_cached_at = 0.0
+        self.health_lock = threading.Lock()
         self.csrf_token = secrets.token_urlsafe(32)
         self.lock = threading.Lock()
         self.running = False
@@ -63,6 +68,16 @@ class RunState:
                 "kanbanAvailable": self.dashboard_path.is_file(),
                 "yearRoot": str(self.year_root),
             }
+
+    def overview(self) -> dict[str, Any]:
+        with self.health_lock:
+            if time.monotonic() - self.health_cached_at >= 30:
+                try:
+                    self.health_cache = {**health(self.year_root), **board(self.year_root)}
+                except (OSError, ValueError, sqlite3.Error) as error:
+                    self.health_cache = {"error": str(error), "services": {}, "cards": [], "counts": {}}
+                self.health_cached_at = time.monotonic()
+            return self.health_cache
 
     def start(self, mode: str, sync_project: bool) -> tuple[bool, str]:
         if mode not in {"preview", "wip_scan", "apply"}:
@@ -154,18 +169,31 @@ def page(token: str) -> str:
 *{{box-sizing:border-box}}body{{margin:0;background:var(--surface);color:var(--text);font:15px/1.45 Roboto,Arial,sans-serif}}main{{max-width:1240px;margin:auto;padding:32px 20px 48px}}h1{{margin:0;font-size:32px;letter-spacing:-.4px}}.sub{{color:var(--muted);margin:7px 0 26px}}.board{{display:grid;grid-template-columns:repeat(5,minmax(190px,1fr));gap:14px;overflow:auto;padding-bottom:8px}}.stage,.panel{{background:var(--surface-2);border-radius:18px;padding:18px;border:1px solid #e6e0e9}}.stage h2{{font-size:16px;margin:0 0 8px}}.stage p,.panel p{{margin:0;color:var(--muted)}}.stage.active{{border-color:var(--primary);box-shadow:0 1px 3px #0002}}.controls{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:24px}}.panel{{display:flex;flex-direction:column;align-items:flex-start}}.panel h2{{font-size:19px;margin:0 0 8px}}.actions{{display:flex;flex-wrap:wrap;gap:10px;margin-top:auto;padding-top:18px}}button,.button-link{{border:0;border-radius:999px;background:var(--primary);color:var(--on-primary);padding:11px 18px;font:600 14px Roboto,Arial;cursor:pointer;box-shadow:0 1px 2px #0003;text-decoration:none}}button.secondary,.button-link.secondary{{background:#e8def8;color:#21005d}}button.tonal{{background:#d8e2ff;color:#17315f}}button:disabled,.button-link.disabled{{opacity:.55;cursor:not-allowed;pointer-events:none}}label{{display:flex;gap:9px;align-items:flex-start;margin:16px 0 0;color:#403b43}}input{{margin-top:3px;accent-color:var(--primary)}}.confirm-row{{display:none;margin-top:14px;padding:12px;border-radius:12px;background:#fff4e7;color:#5d3a00}}.confirm-row.visible{{display:block}}.confirm-row p{{color:inherit;margin-bottom:10px}}.status{{margin-top:22px;padding:13px 15px;border-radius:12px;background:#e8def8;color:#21005d;font-weight:600}}.status.good{{background:#d8f6dd;color:var(--good)}}.status.bad{{background:#ffdad4;color:var(--bad)}}pre{{margin:18px 0 0;min-height:280px;max-height:460px;overflow:auto;background:#201a1b;color:#f5eff0;border-radius:14px;padding:16px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}}code{{font-size:.92em}}.meta{{color:var(--muted);font-size:13px;margin-top:8px}}@media(max-width:900px){{.controls{{grid-template-columns:1fr}}}}@media(max-width:760px){{main{{padding:24px 14px}}.board{{grid-template-columns:repeat(5,78vw)}}}}
 </style></head><body><main>
 <h1>Document Sync</h1><p class='sub'>Local-only control panel · WIP rules, Kanban review, managed routing, and verification in one flow.</p>
-<section class='board' aria-label='Sync workflow'><article class='stage'><h2>1 · Preview</h2><p>Dry-run managed routes and folder-name changes without changing source documents.</p></article><article class='stage'><h2>2 · Scan</h2><p>Index root files and configured WIP folders with the canonical rules.</p></article><article class='stage'><h2>3 · Review</h2><p>Open the Kanban board and resolve items that require a human decision.</p></article><article class='stage'><h2>4 · Apply</h2><p>Move only approved managed documents and normalize folder names.</p></article><article class='stage'><h2>5 · Verify</h2><p>Refresh Kanban, confirm exit code 0, and inspect recorded actions.</p></article></section>
+<section class='board' aria-label='Sync workflow'><article class='stage'><h2>1 · Preview</h2><p>Dry-run managed routes and folder-name changes without changing source documents.</p></article><article class='stage'><h2>2 · Scan</h2><p>Index root files and configured WIP folders with the canonical rules.</p></article><article class='stage'><h2>3 · Review</h2><p>Open the Kanban board and resolve items that require a human decision.</p></article><article class='stage'><h2>4 · Apply</h2><p>Apply managed routes and accounting rules, then verify the results.</p></article><article class='stage'><h2>5 · Verify</h2><p>Refresh Kanban, confirm exit code 0, and inspect recorded actions.</p></article></section>
 <section class='controls'>
 <article class='panel'><h2>Safe preview</h2><p>Runs the organizer with <code>--dry-run --plan-managed-rules --no-sync</code>, then refreshes the WIP index and Kanban. Source documents are not moved, renamed, copied, or deleted.</p><div class='actions'><button id='preview'>Preview routing</button></div></article>
 <article class='panel'><h2>WIP / Kanban</h2><p>Classifies root files and configured WIP folders. This updates only the local index and dashboard; <code>review_only</code> rules never move documents.</p><div class='actions'><button id='wip-scan' class='tonal'>Refresh Kanban</button><a id='open-kanban' class='button-link secondary disabled' href='/kanban' target='_blank' rel='noopener' aria-disabled='true'>Open Kanban</a></div></article>
-<article class='panel'><h2>Apply managed routes</h2><p>Moves approved current-year-root files, normalizes eligible <code>AT.</code> folders, then refreshes Kanban.</p><label><input id='sync-project' type='checkbox'>Also run the final rclone project sync (external change)</label><div class='actions'><button id='apply' class='secondary'>Apply changes</button></div><div id='apply-confirm' class='confirm-row' role='status'><p>Apply managed routes and folder-name changes now?</p><div class='actions'><button id='confirm-apply'>Yes, apply</button><button id='cancel-apply' class='secondary'>Cancel</button></div></div></article>
+<article class='panel'><h2>Apply managed routes</h2><p>Runs managed routes, existing invoice/UNC and intake rules, normalizes eligible <code>AT.</code> folders, then refreshes Kanban.</p><label><input id='sync-project' type='checkbox'>Also run the final rclone project sync (external change)</label><div class='actions'><button id='apply' class='secondary'>Apply changes</button></div><div id='apply-confirm' class='confirm-row' role='status'><p>Apply managed routes and folder-name changes now?</p><div class='actions'><button id='confirm-apply'>Yes, apply</button><button id='cancel-apply' class='secondary'>Cancel</button></div></div></article>
 </section>
+<section class='panel' style='margin-top:24px'><h2>System health · Intake Kanban</h2><p id='health-summary'>Checking watcher and timer…</p><p id='queue-summary'></p><details style='width:100%;margin-top:12px'><summary>Files and next actions</summary><div id='queue-files'></div></details><p class='meta'>CLI: docsync board · docsync status · docsync preview</p></section>
 <div id='status' class='status'>Checking local runner…</div><p class='meta'>Only one run can execute at a time. This app listens only on 127.0.0.1 and requires this browser session’s request token.</p><pre id='logs' aria-live='polite'>No run yet.</pre>
 </main><script>
 const token={safe_token}, status=document.querySelector('#status'), logs=document.querySelector('#logs'), preview=document.querySelector('#preview'), wipScan=document.querySelector('#wip-scan'), apply=document.querySelector('#apply'), confirmApply=document.querySelector('#confirm-apply'), cancelApply=document.querySelector('#cancel-apply'), applyConfirm=document.querySelector('#apply-confirm'), syncProject=document.querySelector('#sync-project'), openKanban=document.querySelector('#open-kanban');
-function setState(data){{const running=data.running, failed=!running&&data.exitCode!==null&&data.exitCode!==0, modeLabel=data.mode==='wip_scan'?'WIP scan':data.mode;status.textContent=running?`Running ${{modeLabel}}…`:failed?`Last run failed (exit ${{data.exitCode}}).`:data.exitCode===0?'Last run completed successfully.':'Ready for a preview.';status.className='status '+(running?'':failed?'bad':'good');[preview,wipScan,apply,confirmApply,cancelApply].forEach(el=>el.disabled=running);syncProject.disabled=running;openKanban.classList.toggle('disabled',!data.kanbanAvailable);openKanban.setAttribute('aria-disabled',String(!data.kanbanAvailable));logs.textContent=data.logs.length?data.logs.join('\\n'):'No run yet.';logs.scrollTop=logs.scrollHeight;}}
+function setState(data){{const running=data.running, failed=!running&&data.exitCode!==null&&data.exitCode!==0, modeLabel=data.mode==='wip_scan'?'WIP scan':data.mode;status.textContent=data.exitCode===75?'Another organizer run is active. Retry after it finishes.':running?`Running ${{modeLabel}}…`:failed?`Last run failed (exit ${{data.exitCode}}).`:data.exitCode===0?'Last run completed successfully.':'Ready for a preview.';status.className='status '+(running?'':failed?'bad':'good');[preview,wipScan,apply,confirmApply,cancelApply].forEach(el=>el.disabled=running);syncProject.disabled=running;openKanban.classList.toggle('disabled',!data.kanbanAvailable);openKanban.setAttribute('aria-disabled',String(!data.kanbanAvailable));logs.textContent=data.logs.length?data.logs.join('\\n'):'No run yet.';logs.scrollTop=logs.scrollHeight;}}
 async function refresh(){{try{{setState(await (await fetch('/api/status',{{cache:'no-store'}})).json())}}catch(error){{status.textContent='Unable to reach the local runner.';status.className='status bad';}}}}
 async function run(mode){{applyConfirm.classList.remove('visible');const response=await fetch('/api/run',{{method:'POST',headers:{{'Content-Type':'application/json','X-CSRF-Token':token}},body:JSON.stringify({{mode:mode,syncProject:mode==='apply'&&syncProject.checked}})}});const data=await response.json();if(!response.ok){{status.textContent=data.message||'Run could not start.';status.className='status bad';}}setState(data);}}
+async function refreshOverview(){{
+  try{{
+    const data=await (await fetch('/api/overview',{{cache:'no-store'}})).json();
+    const watcher=data.services['ivar-watcher.service']||{{}}, timer=data.services['ivar-documents-organizer.timer']||{{}};
+    document.querySelector('#health-summary').textContent=data.error||`Theo dõi file: ${{watcher.ActiveState==='active'?'Đang chạy':'Cần kiểm tra'}} · Lịch tự động: ${{timer.ActiveState==='active'?'Đang bật':'Cần kiểm tra'}} · Xử lý: ${{data.organizerBusy?'Đang chạy':'Sẵn sàng'}} · Lần hẹn giờ gần nhất: ${{data.lastTimerRun||'Chưa rõ'}} · Lượt kế tiếp: ${{data.nextRun?new Date(data.nextRun).toLocaleString('vi-VN'):'Chưa rõ'}}`;
+    const labels={{needs_review:'Chờ duyệt',in_progress:'Đang xử lý',waiting_external:'Chờ bên ngoài',ready:'Sẵn sàng chuyển',filed:'Đã lưu hồ sơ',archived:'Lưu trữ'}};
+    document.querySelector('#queue-summary').textContent=Object.entries(data.counts).map(([key,count])=>`${{labels[key]||key}}: ${{count}}`).join(' · ');
+    const container=document.querySelector('#queue-files');container.replaceChildren();
+    for(const card of data.cards){{const row=document.createElement('p');row.style.margin='12px 0';row.textContent=`${{card.path}} — ${{labels[card.stage]||card.stage}} · ${{card.reason}} · Tiếp theo: ${{card.next}}`;container.appendChild(row);}}
+  }}catch(error){{document.querySelector('#health-summary').textContent='Unable to load system health.';}}
+}}
+refreshOverview();setInterval(refreshOverview,30000);
 preview.onclick=()=>run('preview');wipScan.onclick=()=>run('wip_scan');apply.onclick=()=>applyConfirm.classList.add('visible');confirmApply.onclick=()=>run('apply');cancelApply.onclick=()=>applyConfirm.classList.remove('visible');openKanban.onclick=event=>{{if(openKanban.getAttribute('aria-disabled')==='true') event.preventDefault();}};refresh();setInterval(refresh,1000);
 </script></body></html>"""
 
@@ -195,7 +223,18 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def local_request(self) -> bool:
+        allowed_hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+        host = self.headers.get("Host", "")
+        origin = self.headers.get("Origin")
+        if host not in allowed_hosts or (origin and origin not in {f"http://{value}" for value in allowed_hosts}):
+            self.send_json(HTTPStatus.FORBIDDEN, {"message": "Local origin required."})
+            return False
+        return True
+
     def do_GET(self) -> None:
+        if not self.local_request():
+            return
         if self.path == "/":
             body = page(APP_STATE.csrf_token).encode("utf-8")
             self.send_html(HTTPStatus.OK, body)
@@ -214,12 +253,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_html(HTTPStatus.OK, body)
             return
+        if self.path == "/api/overview":
+            self.send_json(HTTPStatus.OK, APP_STATE.overview())
+            return
         if self.path == "/api/status":
             self.send_json(HTTPStatus.OK, APP_STATE.snapshot())
             return
         self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
 
     def do_POST(self) -> None:
+        if not self.local_request():
+            return
         if self.path != "/api/run":
             self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
             return

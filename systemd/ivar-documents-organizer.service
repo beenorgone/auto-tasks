@@ -1,0 +1,7 @@
+[Unit]
+Description=IVAR Documents Organizer
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh %h/Documents/.auto-tasks/ivar-documents-organizer.sh --apply-managed-rules
+SuccessExitStatus=75

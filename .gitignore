@@ -8,3 +8,7 @@ gmail_brief/credentials.json
 gmail_brief/tokens/
 gmail_brief/.env
 gmail_brief/briefs/
+.venv-docsync/
+ivar-documents-organizer/organizer.lock
+output/playwright/
+.playwright-cli/

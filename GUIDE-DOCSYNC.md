@@ -97,6 +97,8 @@ docsync status
 
 Ngoài 4 rule managed, Apply còn chạy các bộ xử lý kế toán hiện có: hóa đơn, UNC, PO/MO, xử lý trùng và tiếp nhận file. Các quy tắc cũ như dọn log ở gốc năm và gom file theo kỳ vẫn thuộc organizer.
 
+Tài liệu PO rời được lưu tại `<Documents>/<năm>/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới tại thư mục tiếp nhận được giữ lại để kiểm tra nhóm nhập khẩu/trong nước, trước cả bước xử lý trùng; không tự suy đoán nhóm.
+
 Chỉ khi muốn chạy thêm đồng bộ project ra ngoài bằng rclone:
 
 ```bash

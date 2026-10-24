@@ -1775,15 +1775,30 @@ process_po_document() {
   file_mtime=$2
   file_size=$3
   sha=$4
-  dest_dir="${CURRENT_MONTH_ROOT}/documents/file don nhap hang (PO)"
+  # Standalone PO documents belong with purchase reports. Purchase dossier
+  # ZIPs are held before duplicate detection in process_source_file.
+  base_name=$(basename "$source_path")
+  filename_date=$(printf '%s\n' "$base_name" | grep -Eo '20[0-9]{2}-[0-9]{2}-[0-9]{2}' | head -n 1 || true)
+  if [ -n "$filename_date" ] && parsed_date=$(date -d "$filename_date" '+%Y-%m-%d' 2>/dev/null) && [ "$parsed_date" = "$filename_date" ]; then
+    po_year=$(date -d "$filename_date" '+%Y')
+  else
+    po_year=$CURRENT_YEAR
+    warn "PO filename has no single valid YYYY-MM-DD date; routing to current-year purchase reports: $source_path"
+  fi
+  dest_dir="${DOCS_ROOT}/${po_year}/20_BAO_CAO/Nhap hang"
   ensure_dir "$dest_dir"
   target="${dest_dir}/$(basename "$source_path")"
   if [ -e "$target" ]; then
-    target="${dest_dir}/${sha}_$(basename "$source_path")"
+    if [ "$(sha256_file "$target")" = "$sha" ]; then
+      info "PO document already exists unchanged at destination; keeping source: $source_path"
+      return 0
+    fi
+    warn "PO destination collision; keeping source for review: $source_path -> $target"
+    return 0
   fi
   run_cmd mv "$source_path" "$target"
   info "Processed PO document -> $target"
-  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "po-document" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "filename-po"
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "po-document" "$po_year" "" "" "" "" "filename-po"
 }
 
 process_mo_document() {
@@ -2124,6 +2139,14 @@ process_source_file() {
 
   if [ ! -f "$source_path" ]; then
     info "Skipping missing file: $source_path"
+    return 0
+  fi
+
+  # A complete purchase dossier is not a PO report. Without its archive
+  # context we cannot infer nhap khau/trong nuoc. Hold it for review before
+  # duplicate detection or the generic PO handler can move it elsewhere.
+  if basename "$source_path" | grep -Eqi '^ho so [Pp][Oo][[:space:]_-]*[0-9]+.*\.zip$'; then
+    info "REVIEW purchase dossier ZIP: keep in intake until purchase archive group is confirmed: $source_path"
     return 0
   fi
 

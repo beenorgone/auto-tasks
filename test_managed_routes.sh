@@ -27,6 +27,7 @@ RECON_FILE="bien_ban_doi_soat_test.xlsx"
 SAOKE_FILE="11090087_SAOKE_TK_202608.pdf"
 PLAN_JUNK_LOG="preview-must-not-delete.log"
 PLAN_PO_FILE="PO-9988 preview must not move.txt"
+PURCHASE_ZIP="ho so PO9989 - 2026-08-25 - NCC Test.zip"
 
 printf 'vat report' >"${YEAR_ROOT}/${VAT_FILE}"
 printf 'shopee report' >"${YEAR_ROOT}/${SHOPEE_FILE}"
@@ -35,6 +36,12 @@ printf 'reconciliation report' >"${YEAR_ROOT}/${RECON_FILE}"
 printf 'bank statement' >"${YEAR_ROOT}/${SAOKE_FILE}"
 printf 'preview junk log' >"${YEAR_ROOT}/${PLAN_JUNK_LOG}"
 printf 'preview purchase order' >"${YEAR_ROOT}/${PLAN_PO_FILE}"
+python3 - "$YEAR_ROOT/$PURCHASE_ZIP" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], 'w') as archive:
+    archive.writestr('invoice.txt', 'purchase dossier attachment')
+PY
+PURCHASE_SHA=$(sha256sum "$YEAR_ROOT/$PURCHASE_ZIP" | cut -d' ' -f1)
 
 mkdir -p "${YEAR_ROOT}/AT.GHTK reports"
 printf 'pre-existing file with the same name' >"${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}"
@@ -94,6 +101,12 @@ echo "== idempotency: a second apply run must not error or reprocess moved files
 run_organizer --apply-managed-rules
 [ -f "${YEAR_ROOT}/AT. VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
 echo "OK: second apply run is idempotent"
+
+[ -f "$YEAR_ROOT/$PURCHASE_ZIP" ] || fail "purchase dossier ZIP was moved out of intake"
+[ "$(sha256sum "$YEAR_ROOT/$PURCHASE_ZIP" | cut -d' ' -f1)" = "$PURCHASE_SHA" ] || fail "purchase dossier ZIP changed"
+[ ! -e "$YEAR_ROOT/20_BAO_CAO/Nhap hang/$PURCHASE_ZIP" ] || fail "purchase dossier ZIP was treated as a PO report"
+[ -f "$YEAR_ROOT/20_BAO_CAO/Nhap hang/$PLAN_PO_FILE" ] || fail "standalone PO document was not filed as a report"
+echo "OK: purchase dossier ZIP held for review; standalone PO report still routed"
 
 echo "== junk .log cleanup: dry-run preserves, a normal run deletes =="
 JUNK_LOG="somesite.com-1755999999999.log"

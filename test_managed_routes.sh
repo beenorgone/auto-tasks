@@ -43,8 +43,8 @@ with zipfile.ZipFile(sys.argv[1], 'w') as archive:
 PY
 PURCHASE_SHA=$(sha256sum "$YEAR_ROOT/$PURCHASE_ZIP" | cut -d' ' -f1)
 
-mkdir -p "${YEAR_ROOT}/AT.GHTK reports"
-printf 'pre-existing file with the same name' >"${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}"
+mkdir -p "${YEAR_ROOT}/20_BAO_CAO/GHTK"
+printf 'pre-existing file with the same name' >"${YEAR_ROOT}/20_BAO_CAO/GHTK/${GHTK_FILE}"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -67,10 +67,10 @@ run_organizer --plan-managed-rules
 [ -f "${YEAR_ROOT}/${SAOKE_FILE}" ] || fail "plan mode moved SAOKE file"
 [ -f "${YEAR_ROOT}/${PLAN_JUNK_LOG}" ] || fail "plan mode deleted a loose log"
 [ -f "${YEAR_ROOT}/${PLAN_PO_FILE}" ] || fail "plan mode moved a non-managed PO file"
-[ -d "${YEAR_ROOT}/AT.GHTK reports" ] || fail "plan mode renamed a managed folder"
-[ ! -d "${YEAR_ROOT}/AT. VAT" ] || fail "plan mode created AT. VAT"
-[ ! -d "${YEAR_ROOT}/AT. Shopee reports" ] || fail "plan mode created AT. Shopee reports"
-content=$(cat "${YEAR_ROOT}/AT.GHTK reports/${GHTK_FILE}")
+[ -d "${YEAR_ROOT}/20_BAO_CAO/GHTK" ] || fail "plan mode renamed a managed folder"
+[ -d "${YEAR_ROOT}/20_BAO_CAO/VAT" ] || fail "initialized VAT destination missing"
+[ -d "${YEAR_ROOT}/20_BAO_CAO/Shopee" ] || fail "initialized Shopee destination missing"
+content=$(cat "${YEAR_ROOT}/20_BAO_CAO/GHTK/${GHTK_FILE}")
 [ "$content" = "pre-existing file with the same name" ] || fail "plan mode altered pre-existing collision file"
 echo "OK: plan mode is read-only"
 
@@ -82,16 +82,16 @@ run_organizer
 [ ! -e "${YEAR_ROOT}/${GHTK_FILE}" ] || fail "GHTK file still present in year root after apply"
 [ ! -e "${YEAR_ROOT}/${RECON_FILE}" ] || fail "reconciliation file still present in year root after apply"
 
-[ ! -d "${YEAR_ROOT}/AT.GHTK reports" ] || fail "legacy managed folder was not renamed"
-[ -f "${YEAR_ROOT}/AT. VAT/${VAT_FILE}" ] || fail "VAT file not routed to AT. VAT"
-[ -f "${YEAR_ROOT}/AT. Shopee reports/${SHOPEE_FILE}" ] || fail "Shopee file not routed to AT. Shopee reports"
-[ -f "${YEAR_ROOT}/AT. GHTK reports/${RECON_FILE}" ] || fail "reconciliation file not routed to AT. GHTK reports"
-[ -f "${YEAR_ROOT}/AT. SAOKE/${SAOKE_FILE}" ] || fail "SAOKE file not routed to AT. SAOKE"
+[ -d "${YEAR_ROOT}/20_BAO_CAO/GHTK" ] || fail "report destination missing"
+[ -f "${YEAR_ROOT}/20_BAO_CAO/VAT/${VAT_FILE}" ] || fail "VAT file not routed to 20_BAO_CAO/VAT"
+[ -f "${YEAR_ROOT}/20_BAO_CAO/Shopee/${SHOPEE_FILE}" ] || fail "Shopee file not routed to 20_BAO_CAO/Shopee"
+[ -f "${YEAR_ROOT}/20_BAO_CAO/GHTK/${RECON_FILE}" ] || fail "reconciliation file not routed to 20_BAO_CAO/GHTK"
+[ -f "${YEAR_ROOT}/20_BAO_CAO/Sao ke/${SAOKE_FILE}" ] || fail "SAOKE file not routed to 20_BAO_CAO/Sao ke"
 
-content=$(cat "${YEAR_ROOT}/AT. GHTK reports/${GHTK_FILE}")
+content=$(cat "${YEAR_ROOT}/20_BAO_CAO/GHTK/${GHTK_FILE}")
 [ "$content" = "pre-existing file with the same name" ] || fail "collision overwrote the pre-existing GHTK file"
 
-sha_named=$(find "${YEAR_ROOT}/AT. GHTK reports" -maxdepth 1 -type f -name "GHTK_bao_cao_test_*.xlsx")
+sha_named=$(find "${YEAR_ROOT}/20_BAO_CAO/GHTK" -maxdepth 1 -type f -name "GHTK_bao_cao_test_*.xlsx")
 [ -n "$sha_named" ] || fail "colliding GHTK file was not renamed with a SHA-256 suffix"
 moved_content=$(cat "$sha_named")
 [ "$moved_content" = "ghtk report" ] || fail "SHA-suffixed file does not contain the moved source content"
@@ -99,7 +99,7 @@ echo "OK: apply mode routed all four files, collision handled with SHA-256 suffi
 
 echo "== idempotency: a second apply run must not error or reprocess moved files =="
 run_organizer --apply-managed-rules
-[ -f "${YEAR_ROOT}/AT. VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
+[ -f "${YEAR_ROOT}/20_BAO_CAO/VAT/${VAT_FILE}" ] || fail "VAT file missing after second apply run"
 echo "OK: second apply run is idempotent"
 
 [ -f "$YEAR_ROOT/$PURCHASE_ZIP" ] || fail "purchase dossier ZIP was moved out of intake"
@@ -134,3 +134,13 @@ stray=$(find "${YEAR_ROOT}" -type f -path "*/duplicates/site*.log" 2>/dev/null)
 echo "OK: byte-identical junk logs are both deleted outright, none diverted to duplicates/"
 
 echo "ALL MANAGED ROUTE INTEGRATION CHECKS PASSED"
+
+echo "== inbox routing: nested intake reports use canonical destinations =="
+mkdir -p "${YEAR_ROOT}/00_INBOX/import-batch"
+printf 'new inbox report' >"${YEAR_ROOT}/00_INBOX/import-batch/GHTK_inbox.xlsx"
+run_organizer --plan-managed-rules
+[ -f "${YEAR_ROOT}/00_INBOX/import-batch/GHTK_inbox.xlsx" ] || fail "preview moved inbox source"
+run_organizer
+[ -f "${YEAR_ROOT}/20_BAO_CAO/GHTK/GHTK_inbox.xlsx" ] || fail "inbox report not routed"
+[ ! -e "${YEAR_ROOT}/00_INBOX/import-batch/GHTK_inbox.xlsx" ] || fail "inbox source still present"
+echo "OK: nested inbox report routed to canonical target"

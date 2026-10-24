@@ -6,6 +6,53 @@ DocSync nhận diện và sắp xếp tài liệu, theo dõi hồ sơ trên Kanb
 - Giao diện web: <http://127.0.0.1:8787>
 - Thư mục tài liệu mặc định: `~/Documents/<năm hiện tại>`; trong năm 2026 là `~/Documents/2026`.
 
+## Cấu trúc thư mục từ phiên bản rule 9
+
+```text
+2026/
+├── 00_INBOX/Hoa don/
+├── 10_HO_SO/
+│   ├── Ke toan/
+│   ├── Chat luong/
+│   ├── Bao bi/
+│   ├── Kinh doanh/B2B/
+│   │   ├── Bang gia/
+│   │   └── Doi soat cong no/
+│   ├── Phap ly/
+│   └── Nhap hang/
+├── 20_BAO_CAO/
+│   ├── VAT/
+│   ├── Shopee/
+│   ├── GHTK/
+│   └── Sao ke/
+├── 80_THAM_CHIEU/
+│   ├── Bieu mau/Sao ke/
+│   ├── Quy chuan/
+│   └── Ma QR/
+├── 90_CACH_LY_KY_THUAT/
+├── 99_NHAT_KY/
+├── Others/
+├── 01/ ... 12/                 # Giữ các thư mục tháng hiện có
+└── .wip/
+```
+
+Tên thư mục mô tả nội dung. Trạng thái xử lý nằm trên Kanban; `10_WIP` và
+`90_NEEDS_REVIEW` cũ chỉ được bỏ khi rỗng. B2B hiện chỉ có **bảng giá** và
+**đối soát công nợ**. Phân loại B2B vẫn cần duyệt, không tự chuyển theo tên.
+
+`10_HO_SO` là nơi làm việc với hồ sơ nghiệp vụ. Bộ xử lý hóa đơn/UNC vẫn sử dụng
+đích kế toán chính thức đang cấu hình trong project IVAR.
+
+Đợt đổi cấu trúc giữ nguyên tên file và cấu trúc bên trong từng bộ hồ sơ; không
+suy diễn tháng sao kê hay số tài khoản từ ngày tải file. Báo cáo chưa có cấu
+trúc kỳ rõ ràng được giữ trong nhóm báo cáo tương ứng. Phạm vi Scan bao gồm
+Inbox, Hồ sơ, Báo cáo, Tham chiếu và Cách ly kỹ thuật, không bao gồm `Others`.
+
+Nhật ký chuyển nằm trong `99_NHAT_KY/layout-migration-*.json`; bản sao chỉ mục,
+rule và database đường dẫn trước khi chuyển nằm trong `.wip/layout-backup-*`.
+Di chuyển thủ công bằng file manager có thể làm lệch chỉ mục; hãy dùng quy trình
+migration có kiểm tra hash và cập nhật đường dẫn khi đổi cấu trúc tiếp.
+
 ## 1. Bắt đầu nhanh
 
 Máy hiện tại đã có lệnh `docsync`. Nếu terminal đang mở từ trước khi cập nhật, nạp lại alias:
@@ -132,14 +179,14 @@ Board kết hợp file trực tiếp ở gốc năm với các file đã có tro
 
 ### Các nhóm tự chuyển theo managed rules
 
-Các rule này áp dụng cho file trực tiếp tại gốc thư mục năm hiện tại, sau các bước kiểm tra của organizer.
+Các rule này áp dụng cho file tại gốc năm và trong `00_INBOX`, sau các bước kiểm tra của organizer.
 
 | Mã nhóm | Nhận diện chính | Đích trong thư mục năm |
 |---|---|---|
-| `vat` | Tên chứa `iv-mtt-batch` hoặc `iv-company-batch` | `AT. VAT` |
-| `shopee_reports` | Mẫu `Order.` hoặc `orders_YYYY-MM-DD_YYYY-MM-DD.xlsx` | `AT. Shopee reports` |
-| `ghtk_reports` | Mẫu `GHTK_` hoặc `bien_ban_doi_soat` | `AT. GHTK reports` |
-| `bank_statements` | Mẫu `SAOKE`/`sao ke`; các tên giao dịch chung phải kiểm tra nội dung | `AT. SAOKE` |
+| `vat` | Tên chứa `iv-mtt-batch` hoặc `iv-company-batch` | `20_BAO_CAO/VAT` |
+| `shopee_reports` | Mẫu `Order.` hoặc `orders_YYYY-MM-DD_YYYY-MM-DD.xlsx` | `20_BAO_CAO/Shopee` |
+| `ghtk_reports` | Mẫu `GHTK_` hoặc `bien_ban_doi_soat` | `20_BAO_CAO/GHTK` |
+| `bank_statements` | Mẫu `SAOKE`/`sao ke`; các tên giao dịch chung phải kiểm tra nội dung | `20_BAO_CAO/Sao ke` |
 
 Với `Danh sach giao dich*.xls/xlsx` và `lich-su-giao-dich*.xls/xlsx`, DocSync cần xác nhận thông tin ngân hàng, tài khoản và số dư hoặc ghi nợ/ghi có. File không đọc được, vượt giới hạn hoặc không đủ bằng chứng sẽ chờ duyệt. Bộ đọc XLS cần môi trường `.venv-docsync` và thư viện trong `requirements-docsync.txt`.
 
@@ -176,7 +223,7 @@ Thông tin sức khỏe và hàng đợi trên web được làm mới theo chu 
 
 ## 6. Tự động chạy và khóa chống trùng
 
-- Watcher theo dõi file trực tiếp trong `~/Documents`, `~/Downloads` và thư mục năm hiện tại; không theo dõi đệ quy tất cả thư mục con.
+- Watcher theo dõi file trực tiếp trong `~/Documents`, `~/Downloads`, gốc năm, `00_INBOX` và `00_INBOX/Hoa don`. Các thư mục sâu hơn trong Inbox được xử lý khi chạy Apply hoặc timer; watcher không theo dõi đệ quy.
 - Chu kỳ kiểm tra là 5 giây; chờ 20 giây không có thay đổi mới, rồi chạy. Khoảng nghỉ tối thiểu giữa các lượt là 60 giây.
 - File ẩn, symlink và file tải dở `.part`, `.crdownload`, `.tmp` được bỏ qua khi theo dõi.
 - Các file có sẵn lúc watcher khởi động chờ timer hoặc một lần Apply chủ động.
@@ -243,3 +290,19 @@ docsync --year-root "$HOME/Documents/2026" board
 Preview/Apply chỉ hỗ trợ thư mục năm hiện tại. `status` phản ánh các dịch vụ chung của máy.
 
 Hướng dẫn cài đặt môi trường, triển khai dịch vụ và chạy kiểm thử: [README-wip-organizer.md](README-wip-organizer.md).
+
+## 9. Tự xếp hồ sơ mua vào theo tháng
+
+Rule `purchase_months` dùng chung cho organizer (CLI/web/timer) và watcher, tại:
+`~/Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu/ho so mua vao`.
+Nếu đặt `IVAR_DATA`, rule dùng thư mục `ho so mua vao` bên trong đường dẫn đó.
+
+- Nhận file hoặc thư mục bắt đầu bằng `ho so `, có đúng một ngày hợp lệ `YYYY-MM-DD` trên tên; năm phải khớp thư mục năm.
+- Đích: `<năm>/<MM>/` hoặc `<năm>/nhap khau|trong nuoc/<MM>/`. Hồ sơ trong `Q1`–`Q4` hoặc tháng sai cũng được đưa về tháng đúng; không tự xóa thư mục rỗng.
+- Bộ hồ sơ ZIP mang mã PO vẫn thuộc kho mua vào theo tháng; giữ nguyên nhóm nhập khẩu/trong nước và toàn bộ bộ hồ sơ. Chỉ tài liệu PO rời thuộc báo cáo `20_BAO_CAO/Nhap hang`.
+- Chuyển nguyên thư mục hồ sơ, bao gồm ghi chú; không giải nén ZIP. Không suy đoán tháng từ ngày sửa file.
+- Kanban: `ready` khi cần chuyển, `filed` khi đúng tháng, `needs_review` khi tên/ngày/năm không rõ hoặc đích trùng. Với rule này, sửa tên/vị trí hoặc kiểm tra đích trùng rồi chạy Preview; không dùng `review <dossier>`.
+- `docsync rules` hiển thị rule; `docsync preview` chỉ in kế hoạch. `docsync apply` áp dụng trong khóa chung, ghi nguồn/đích vào `ivar-documents-organizer/purchase-months.jsonl` để truy vết/hoàn tác thủ công.
+- Watcher kiểm tra thêm các năm, nhóm và thư mục quý/tháng trong phạm vi trên mỗi 5 giây; theo dõi thay đổi của file đính kèm trong bộ hồ sơ và chờ yên 20 giây. Không quét các nhánh tùy ý ngoài cấu trúc này.
+- Không ghi đè đích, không đi qua symlink, không chuyển bộ hồ sơ còn `.part`, `.crdownload`, `.tmp`. Hồ sơ có sẵn lúc watcher khởi động vẫn chờ Apply/timer hoặc thay đổi mới.
+- Rule chỉ sắp xếp thư mục local; không bật thêm rclone. Lượt `--rescan-unc` không áp dụng rule này.

@@ -9,6 +9,8 @@ import sqlite3
 import subprocess
 import time
 from pathlib import Path
+import docsync_purchase as PURCHASE
+from docsync_layout import is_filed_report, is_intake, approved_target
 
 ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('docsync_wip', ROOT / 'wip-organizer.py')
@@ -45,9 +47,9 @@ def board(year_root: Path) -> dict:
             mode = 'review_only'  # Manual target decisions never bypass the routing allow-list.
         if status in ('filed', 'archived', 'in_progress', 'waiting_external'):
             stage = status
-        elif Path(relative).parts[0] in ('AT. VAT', 'AT. SAOKE', 'AT. GHTK reports', 'AT. Shopee reports'):
+        elif is_filed_report(relative):
             stage = 'filed'
-        elif mode == 'managed_move' and relative in root_paths:
+        elif mode == 'managed_move' and is_intake(relative) and approved_target(year_root, target):
             stage = 'ready'
         else:
             stage = 'needs_review'
@@ -56,6 +58,8 @@ def board(year_root: Path) -> dict:
             next_action = 'Đã duyệt phân loại; chuyển thủ công theo đích đề xuất'
         cards.append(dict(path=relative, category=category, stage=stage, reason=reason, target=target, mode=mode,
                           dossier=old['dossier_id'] if unchanged else None, next=next_action))
+    if year_root.resolve() == (Path.home() / 'Documents' / str(dt.date.today().year)).resolve():
+        cards.extend(PURCHASE.cards(PURCHASE.purchase_root()))
     return {'cards': cards, 'counts': {stage: sum(c['stage'] == stage for c in cards) for stage in STAGES}}
 
 def health(year_root: Path) -> dict:

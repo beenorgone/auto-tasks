@@ -61,15 +61,15 @@ class DocSyncTests(unittest.TestCase):
             (root/'iv-company-batch1.xlsx').write_text('vat')
             (root/'unknown.txt').write_text('unknown')
             WIP.scan(root, [], True)
-            target=root/'AT. GHTK reports';target.mkdir()
+            target=root/'20_BAO_CAO/GHTK';target.mkdir(parents=True, exist_ok=True)
             (target/'GHTK_report.xlsx').write_text('filed')
             WIP.scan(root, [], True)
-            before = {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.name.endswith("-shm")}
+            before = {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.name.endswith(("-shm", "-wal"))}
             result = board(root)
             self.assertEqual(1,result['counts']['ready'])
             self.assertEqual(1,result['counts']['needs_review'])
             self.assertEqual(1,result['counts']['filed'])
-            self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.name.endswith("-shm")})
+            self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.name.endswith(("-shm", "-wal"))})
 
     def test_shared_lock_rejects_second_run_before_processing(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -12,14 +12,8 @@ SPEC.loader.exec_module(WIP)
 
 class WipOrganizerTests(unittest.TestCase):
     def test_default_scopes_include_automation_folders(self):
-        self.assertIn("AT. GHTK reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. B2", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. VAT", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. Shopee reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. QC reports", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. Sourcing contracts", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. Invoice intake", WIP.DEFAULT_SCOPES)
-        self.assertIn("AT. SAOKE", WIP.DEFAULT_SCOPES)
+        for scope in ("00_INBOX", "10_HO_SO", "20_BAO_CAO", "80_THAM_CHIEU", "90_CACH_LY_KY_THUAT"):
+            self.assertIn(scope, WIP.DEFAULT_SCOPES)
 
     def test_deterministic_rules(self):
         for path, category in [
@@ -44,11 +38,11 @@ class WipOrganizerTests(unittest.TestCase):
 
     def test_managed_move_rules_route_to_at_folders(self):
         for path, category, target in [
-            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "AT. VAT"),
-            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "AT. Shopee reports"),
-            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "AT. GHTK reports"),
-            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "AT. GHTK reports"),
-            ("11090087_SAOKE_TK_202608.xlsx", "bank_statements", "AT. SAOKE"),
+            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "20_BAO_CAO/VAT"),
+            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "20_BAO_CAO/Shopee"),
+            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "20_BAO_CAO/GHTK"),
+            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "20_BAO_CAO/GHTK"),
+            ("11090087_SAOKE_TK_202608.xlsx", "bank_statements", "20_BAO_CAO/Sao ke"),
         ]:
             actual_category, confidence, reason, actual_target, route_mode = WIP.classify(Path(path), WIP.DEFAULT_RULES)
             self.assertEqual(category, actual_category)
@@ -72,7 +66,7 @@ class WipOrganizerTests(unittest.TestCase):
             category, confidence, target, route_mode, reason = WIP.route_file(
                 rules_file, "GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx"
             )
-            self.assertEqual(("ghtk_reports", "AT. GHTK reports", "managed_move"), (category, target, route_mode))
+            self.assertEqual(("ghtk_reports", "20_BAO_CAO/GHTK", "managed_move"), (category, target, route_mode))
             self.assertGreaterEqual(confidence, 0.85)
             self.assertTrue(reason)
 
@@ -114,8 +108,8 @@ class WipOrganizerTests(unittest.TestCase):
             WIP.rules_path(root).write_text(json.dumps(rules, ensure_ascii=False), encoding="utf-8")
             migrated = WIP.load_rules(root)
             targets = {item["id"]: item["target"] for item in migrated["categories"]}
-            self.assertEqual("AT. VAT", targets["vat"])
-            self.assertEqual("AT. SAOKE", targets["bank_statements"])
+            self.assertEqual("20_BAO_CAO/VAT", targets["vat"])
+            self.assertEqual("20_BAO_CAO/Sao ke", targets["bank_statements"])
             self.assertEqual("Custom sales target", targets["commerce"])
 
     def test_scan_is_index_only_and_dashboard_is_generated(self):

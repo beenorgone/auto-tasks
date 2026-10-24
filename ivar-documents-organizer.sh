@@ -53,15 +53,15 @@ Options:
               During rescan, remove same-content duplicate files instead of keeping _sha copies.
   --vendors   Print known vendor MST/name reference from the local vendor DB.
   --plan-managed-rules
-              Read-only: normalize the managed-folder naming plan and ask the
+              Read-only: ask the
               WIP rule engine for managed routes (VAT, Shopee reports, GHTK
               reports, SAOKE) for loose files in the current year root.
               Never renames or moves files.
   --apply-managed-rules
               Move loose files in the current year root that match an
               approved managed route (VAT, Shopee reports, GHTK reports,
-              SAOKE) into their AT. * destination. Also renames top-level
-              managed folders from AT.name to AT. name when no collision exists.
+              SAOKE) into its 20_BAO_CAO destination. Legacy folders are
+              moved only by the separately audited layout migration.
   --no-sync   Skip the final rclone project sync.
   --quiet     Reduce console output. Daily logs are still written.
   --help      Show this help text.
@@ -2002,51 +2002,7 @@ maybe_rollover_previous_month() {
 }
 
 is_approved_managed_target() {
-  target=$1
-  case "$target" in
-    "AT. VAT" | "AT. Shopee reports" | "AT. GHTK reports" | "AT. SAOKE") ;;
-    *)
-      return 1
-      ;;
-  esac
-  case "$target" in
-    /*)
-      return 1
-      ;;
-  esac
-  case "$target" in
-    *..*)
-      return 1
-      ;;
-  esac
-  return 0
-}
-
-normalize_managed_folder_names() {
-  [ -d "$CURRENT_YEAR_ROOT" ] || return 0
-
-  find "$CURRENT_YEAR_ROOT" -mindepth 1 -maxdepth 1 -type d -print | while IFS= read -r source_dir; do
-    source_name=$(basename "$source_dir")
-    case "$source_name" in
-      "AT. "*)
-        continue
-        ;;
-      AT.*)
-        target_name="AT. ${source_name#AT.}"
-        target_dir="${CURRENT_YEAR_ROOT}/${target_name}"
-        if [ -e "$target_dir" ]; then
-          warn "Managed-folder rename skipped because the target already exists: $source_dir -> $target_dir"
-          continue
-        fi
-        if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
-          info "PLAN managed-folder rename: $source_dir -> $target_dir"
-        elif [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
-          run_cmd mv "$source_dir" "$target_dir"
-          info "Managed-folder renamed: $source_dir -> $target_dir"
-        fi
-        ;;
-    esac
-  done
+  python3 "$WIP_ORGANIZER_PY" --year-root "$CURRENT_YEAR_ROOT" check-target --target "$1"
 }
 
 initialize_managed_rules() {
@@ -2174,6 +2130,41 @@ process_source_file() {
   fi
 
   sha=$(sha256_file "$source_path")
+
+  # Fast Saokenhanh exports encode the statement period in the filename.
+  # File them by year in the explicitly requested bank statement archive.
+  base_name=$(basename "$source_path")
+  if printf '%s' "$base_name" | grep -Eqi '^saokenhanh-[0-9]{2}\.[0-9]{2}\.20[0-9]{2}-[0-9]{2}\.[0-9]{2}\.20[0-9]{2}-'; then
+    period=$(printf '%s' "$base_name" | sed -E 's/^[^-]*-([0-9]{2}\.[0-9]{2}\.(20[0-9]{2}))-[0-9]{2}\.[0-9]{2}\.20[0-9]{2}-.*/\1/')
+    period_year=${period##*.}
+    period_month=$(printf '%s' "$period" | cut -d. -f2)
+    period_day=$(printf '%s' "$period" | cut -d. -f1)
+    valid_period=$(date -d "${period_year}-${period_month}-${period_day}" '+%Y-%m-%d' 2>/dev/null || true)
+    if [ -n "$valid_period" ] && [ "$valid_period" = "${period_year}-${period_month}-${period_day}" ]; then
+      dest_dir="${IVAR_DATA}/ngan hang/sao ke/${period_year}"
+      dest_path="${dest_dir}/${base_name}"
+      if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
+        info "PLAN bank-statement: $source_path -> $dest_path [period=$period]"
+        return 0
+      fi
+      if [ -e "$dest_path" ]; then
+        if [ "$(sha256_file "$dest_path")" = "$sha" ]; then
+          info "Bank statement already exists unchanged; keeping source: $source_path"
+          return 0
+        fi
+        warn "Bank statement destination collision; keeping source for review: $source_path -> $dest_path"
+        return 0
+      fi
+      ensure_dir "$dest_dir"
+      run_cmd mv "$source_path" "$dest_path"
+      info "Routed Saokenhanh statement by filename period -> $dest_path"
+      record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$dest_path" "bank-statement" "$period_year" "$period_month" "" "" "" "filename-period=$period"
+      return 0
+    fi
+    warn "Invalid Saokenhanh statement period; keeping for review: $source_path"
+    return 0
+  fi
+
   dup_record=$(db_find_sha "$sha")
   if [ -n "$dup_record" ]; then
     duplicate_target=$(move_to_duplicate "$source_path" "$CURRENT_YEAR" "$CURRENT_MONTH" "$sha" "$dup_record")
@@ -2182,7 +2173,11 @@ process_source_file() {
   fi
 
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
-    if [ "$source_dir_for_route" = "$CURRENT_YEAR_ROOT" ]; then
+    route_intake=0
+    case "$source_dir_for_route" in
+      "$CURRENT_YEAR_ROOT"|"${CURRENT_YEAR_ROOT}/00_INBOX"|"${CURRENT_YEAR_ROOT}/00_INBOX/"*) route_intake=1 ;;
+    esac
+    if [ "$route_intake" -eq 1 ]; then
       case "$route_file_lower" in
         *.xml)
           # Invoice PDF/XML and UNC processing keep their existing higher-priority handlers.
@@ -2375,6 +2370,13 @@ scan_current_month() {
     done
   else
     warn "Current year folder not found: $CURRENT_YEAR_ROOT"
+  fi
+
+  if [ -d "${CURRENT_YEAR_ROOT}/00_INBOX" ]; then
+    info "Scanning intake files: ${CURRENT_YEAR_ROOT}/00_INBOX"
+    find "${CURRENT_YEAR_ROOT}/00_INBOX" -type f ! -name '.*' | while IFS= read -r source_path; do
+      process_source_file "$source_path" "$tmp_root"
+    done
   fi
 
   if [ -d "$DOCS_ROOT" ]; then
@@ -2765,7 +2767,6 @@ main() {
 
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
     initialize_managed_rules
-    normalize_managed_folder_names
   fi
 
   cleanup_old_logs
@@ -2790,6 +2791,14 @@ main() {
   else
     maybe_rollover_previous_month
     scan_current_month
+  fi
+
+  if [ "$RESCAN_UNC_MODE" -ne 1 ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR"
+    else
+      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" --apply
+    fi
   fi
 
   info "Sync completed."

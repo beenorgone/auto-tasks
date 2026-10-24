@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Debounced non-recursive intake watcher with bounded polling and retry."""
+import docsync_purchase as PURCHASE
 import datetime as dt
 import subprocess
 import time
@@ -48,12 +49,15 @@ class Queue:
 def main():
     home = Path.home()
     def roots():
-        return [home / 'Documents' / str(dt.date.today().year), home / 'Documents', home / 'Downloads']
-    queue = Queue(snapshot(roots()))
-    print('DocSync watcher ready: direct intake files; settle=20s; cooldown=60s', flush=True)
+        year = home / 'Documents' / str(dt.date.today().year)
+        return [year, year / '00_INBOX', year / '00_INBOX/Hoa don', home / 'Documents', home / 'Downloads']
+    def current():
+        return {**snapshot(roots()), **PURCHASE.snapshot(PURCHASE.purchase_root(home))}
+    queue = Queue(current())
+    print('DocSync watcher ready: direct intake + purchase dossiers; settle=20s; cooldown=60s', flush=True)
     while True:
         time.sleep(POLL_SECONDS)
-        if queue.observe(snapshot(roots()), time.monotonic()):
+        if queue.observe(current(), time.monotonic()):
             print('Stable intake change detected; running shared organizer', flush=True)
             code = subprocess.call(['/bin/sh', str(ROOT / 'ivar-documents-organizer.sh'), '--apply-managed-rules', '--no-sync'])
             queue.complete(code, time.monotonic())

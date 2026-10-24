@@ -20,17 +20,15 @@ The generated state is outside this repository at:
 - `../2026/.wip/rules.json` — editable deterministic classification rules
 - `../2026/.wip/dashboard.html` — Material-style Kanban board
 
-The default scan indexes root-level files plus managed `AT. ` folders for GHTK,
-B2, VAT, Shopee reports, SAOKE, QC reports, sourcing contracts, and invoice intake;
-it also scans `WIP ke toan thue`, `Review Label`, the CUC dossier, and product
-self-declaration dossier. The `AT. ` prefix identifies folders maintained by
-automation rules. Personal book collections and PDF conversion artefacts are
+The default scan indexes root files, `00_INBOX`, `10_HO_SO`, `20_BAO_CAO`,
+`80_THAM_CHIEU`, and `90_CACH_LY_KY_THUAT`. Legacy scopes remain readable during
+transition. Folder names describe document content; workflow state lives in Kanban. Personal book collections and PDF conversion artefacts are
 excluded by policy.
 
 Use a narrowly scoped inventory when refining rules:
 
 ```bash
-python3 wip-organizer.py scan --no-root-files --source 'Review Label'
+python3 wip-organizer.py scan --no-root-files --source '10_HO_SO/Bao bi'
 python3 wip-organizer.py dashboard
 ```
 
@@ -124,8 +122,8 @@ legacy invocations through the Tools symlink. UI, CLI, timer and watcher use the
 same organizer and a shared `flock`; a competing run exits 75 (busy) before any
 processing. Watcher busy/error results remain queued for retry.
 
-The watcher inspects only direct intake files in the current-year root,
-Documents and Downloads every 5 seconds. It waits for 20 seconds of stability,
+The watcher inspects direct intake files in the current-year root,
+`00_INBOX`, `00_INBOX/Hoa don`, Documents and Downloads every 5 seconds. It waits for 20 seconds of stability,
 uses a 60-second cooldown and ignores temporary downloads. It supports all
 file types handled by the organizer, not only PDFs. Existing files at watcher
 startup wait for the regular timer or an explicit apply. Watcher runs use
@@ -157,4 +155,44 @@ Validation:
 ```bash
 .venv-docsync/bin/python -m unittest -q test_doc_sync_app.py test_wip_organizer.py test_docsync.py
 sh test_managed_routes.sh
+.venv-docsync/bin/python -m unittest -q test_docsync_layout.py
 ```
+
+## Folder layout migration (v9)
+
+Canonical paths and category associations live in `docsync_layout.py`.
+Four automatic report routes now target `20_BAO_CAO/{VAT,Shopee,GHTK,Sao ke}`.
+B2B uses only `10_HO_SO/Kinh doanh/B2B/{Bang gia,Doi soat cong no}` and stays
+review-only. Folder context wins over incidental filename keywords. Custom rule
+targets are retained; only recognized old defaults are migrated.
+
+`00_INBOX` is scanned for processing during organizer runs, including nested
+invoice packages. `10_HO_SO` holds working dossiers, while existing official
+invoice/UNC destinations in the IVAR project stay in place. Existing month
+folders are retained. New report date/account subfolders are not guessed from
+filesystem timestamps.
+
+For an explicit structural migration, stop the watcher, timer and web app, check
+that the organizer is idle, then plan and review mappings:
+
+```bash
+.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/2026" > /tmp/docsync-layout-plan.json
+```
+
+After reviewing the mappings, run the authorized migration:
+
+```bash
+.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/2026" --apply
+./docsync scan
+```
+
+The migration holds the shared organizer lock, rejects symlinks and destination
+collisions, preserves file names/hash/inodes/mtime, backs up SQLite databases and
+rules, remaps indexed paths and processed final destinations, and rolls back its
+moves on failure. No project/rclone sync is run. Source directories are removed
+only when empty. Unknown B2B files remain at their old location and are listed in
+the plan. Plan mode does not modify source files or metadata.
+
+Review the audit in `99_NHAT_KY`, check `./docsync board`, then restore the services
+that were active before migration. Do not run the legacy broad organizer Apply
+as a substitute for this folder-only migration.

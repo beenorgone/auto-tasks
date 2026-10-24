@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """DocSync command-line Kanban and shared organizer entry point."""
+import docsync_purchase as PURCHASE
 import argparse
 import json
 import subprocess
@@ -50,6 +51,7 @@ def main(argv=None):
         rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
         for rule in rules['categories']:
             print(f"{rule['id']}: {rule['label']} | {rule.get('route_mode', 'review_only')} → {rule['target']}")
+        print(f'{PURCHASE.RULE}: {PURCHASE.RULE_DESCRIPTION} | managed_move | {PURCHASE.purchase_root()}')
         print('Next: docsync review <dossier> <category> --note <reason>')
     elif command == 'scan':
         print(json.dumps(WIP.scan(root, [], True), ensure_ascii=False))

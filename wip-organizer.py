@@ -25,31 +25,21 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
+from docsync_layout import (CATEGORY_TARGETS, REPORT_TARGETS, DIRECTORIES, SCOPES, LEGACY_SCOPES,
+                            OLD_TARGETS, FOLDER_CATEGORIES, B2B_PRICES, B2B_RECONCILIATION,
+                            within, approved_target, safe_directory)
 
 
 TOOL_ROOT = Path(__file__).resolve().parent
 DOCUMENTS_ROOT = TOOL_ROOT.parent
 YEAR_ROOT = DOCUMENTS_ROOT / "2026"
 STATE_DIR_NAME = ".wip"
-DEFAULT_SCOPES = (
-    "AT. GHTK reports",
-    "AT. B2",
-    "AT. VAT",
-    "AT. Shopee reports",
-    "AT. QC reports",
-    "AT. Sourcing contracts",
-    "AT. Invoice intake",
-    "AT. SAOKE",
-    "WIP ke toan thue",
-    "Review Label",
-    "ho so danh gia CUC 20260421",
-    "Tự công bố sản phẩm trong nước-20260607T192041Z-3-001",
-)
-WIP_DIRECTORIES = ("00_INBOX", "10_WIP", "90_NEEDS_REVIEW", "91_TECH_QUARANTINE", "99_ARCHIVE_MANIFESTS")
+DEFAULT_SCOPES = (*SCOPES, *LEGACY_SCOPES)
+WIP_DIRECTORIES = DIRECTORIES
 VALID_STATUSES = ("captured", "auto_classified", "needs_review", "in_progress", "waiting_external", "approved", "filed", "archived")
 
 DEFAULT_RULES = {
-    "version": 8,
+    "version": 9,
     "excluded_paths": [
         "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
         ".wip/**", "00_INBOX/.*/**",
@@ -91,6 +81,10 @@ DEFAULT_RULES = {
          "target": "2026/91_TECH_QUARANTINE"},
     ],
 }
+
+for _category in DEFAULT_RULES["categories"]:
+    _category["target"] = CATEGORY_TARGETS[_category["id"]]
+
 
 MANAGED_TARGETS = {
     "vat": ("AT.VAT", "AT. VAT"),
@@ -150,6 +144,14 @@ def migrate_rules(rules: dict) -> tuple[dict, bool]:
                     category["patterns"].append(extra)
         migrated["version"] = 8
         changed = True
+    for category in categories:
+        category_id = category.get("id")
+        if category.get("target") in OLD_TARGETS.get(category_id, ()):
+            category["target"] = CATEGORY_TARGETS[category_id]
+            changed = True
+    if migrated.get("version", 0) < 9:
+        migrated["version"] = 9
+        changed = True
     return migrated, changed
 
 
@@ -168,8 +170,9 @@ def rules_path(year_root: Path) -> Path:
 def ensure_state(year_root: Path) -> tuple[Path, Path]:
     state = state_dir(year_root)
     state.mkdir(parents=True, exist_ok=True)
-    for name in WIP_DIRECTORIES:
-        (year_root / name).mkdir(exist_ok=True)
+    directories = [safe_directory(year_root, name) for name in WIP_DIRECTORIES]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
     rule_file = rules_path(year_root)
     if not rule_file.exists():
         rule_file.write_text(json.dumps(DEFAULT_RULES, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -302,6 +305,18 @@ def bank_evidence(source: Path | None) -> tuple[bool, str]:
 
 def classify(relative: Path, rules: dict, source: Path | None = None) -> tuple[str, float, str, str | None, str]:
     text = normalized(relative.as_posix())
+    categories = {item["id"]: item for item in rules["categories"]}
+    # Explicit filing location wins over incidental words in the filename.
+    for folder, category_id in sorted(FOLDER_CATEGORIES.items(), key=lambda item: len(item[0]), reverse=True):
+        if within(relative.as_posix(), folder) and category_id in categories:
+            category = categories[category_id]
+            mode = category.get("route_mode", "review_only") if folder in REPORT_TARGETS.values() else "review_only"
+            return category_id, float(category["confidence"]), f"folder: {folder}", folder, mode
+    if re.search(r"\bb2b\b", text):
+        if re.search(r"b[aả]ng gi[aá]", text):
+            return "commerce", 0.94, "B2B price list; review required", B2B_PRICES, "review_only"
+        if re.search(r"(?:d[oố]i so[aá]t|c[oô]ng n[oợ])", text):
+            return "commerce", 0.94, "B2B reconciliation; review required", B2B_RECONCILIATION, "review_only"
     for category in rules["categories"]:
         matched = [pattern for pattern in category["patterns"] if re.search(pattern, text, re.I)]
         if matched:
@@ -361,7 +376,7 @@ def files_for_scan(year_root: Path, scopes: Iterable[Path], root_files: bool, ru
                     seen.add(entry)
     for entry in sorted(seen):
         relative = entry.relative_to(year_root)
-        if not is_excluded(relative, rules) and not is_generated(entry, rules):
+        if not entry.is_symlink() and entry.resolve().is_relative_to(year_root.resolve()) and not is_excluded(relative, rules) and not is_generated(entry, rules):
             yield entry
 
 
@@ -388,6 +403,10 @@ def scan(year_root: Path, source_names: list[str], root_files: bool) -> dict[str
     counters: Counter[str] = Counter()
     with open_db(database) as conn:
         mark_scopes_inactive(conn, year_root, sources, root_files)
+        if not source_names:
+            for indexed in conn.execute("SELECT path FROM documents WHERE active=1").fetchall():
+                if not (year_root / indexed["path"]).is_file():
+                    conn.execute("UPDATE documents SET active=0 WHERE path=?", (indexed["path"],))
         for path in files_for_scan(year_root, sources, root_files, rules):
             stat = path.stat()
             relative = path.relative_to(year_root)
@@ -397,7 +416,7 @@ def scan(year_root: Path, source_names: list[str], root_files: bool) -> dict[str
             manual = prior and prior["classification_reason"].startswith("manual review:") and prior["sha256"] == sha
             if manual:
                 category, confidence, reason, target = prior["category"], prior["confidence"], prior["classification_reason"], prior["proposed_target"]
-            dossier_id = prior["dossier_id"] if manual else dossier_for(category, relative, stat.st_mtime)
+            dossier_id = prior["dossier_id"] if prior and prior["sha256"] == sha else dossier_for(category, relative, stat.st_mtime)
             status = prior["status"] if prior and prior["sha256"] == sha and prior["status"] not in {"captured", "auto_classified", "needs_review"} else ("auto_classified" if confidence >= 0.85 else "needs_review")
             conn.execute(
                 """INSERT INTO documents(path, sha256, byte_size, modified_at, observed_at, category, confidence, classification_reason, proposed_target, dossier_id, status, active)
@@ -550,6 +569,8 @@ def parser() -> argparse.ArgumentParser:
     review.add_argument("--status", choices=("in_progress", "waiting_external", "approved", "filed", "archived"), default="in_progress")
     review.add_argument("--note", default="", help="short reason recorded in the local audit log")
     sub.add_parser("review-queue", help="List dossiers still requiring a human routing decision")
+    check_target = sub.add_parser("check-target", help="Validate an automatic target without changing files")
+    check_target.add_argument("--target", required=True)
     route = sub.add_parser("route", help="Classify one path against a rules file; makes no file changes")
     route.add_argument("--rules", type=Path, required=True, help="path to a rules.json file")
     route.add_argument("--path", required=True, help="relative path or filename to classify")
@@ -563,6 +584,8 @@ ROUTE_NOT_APPROVED = 3
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "check-target":
+        return 0 if approved_target(args.year_root, args.target) else ROUTE_NOT_APPROVED
     if args.command == "route":
         category, confidence, target, route_mode, reason = route_file(args.rules, args.path, args.source)
         print("\t".join([category, f"{confidence:g}", target or "", route_mode, reason]))

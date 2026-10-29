@@ -2,7 +2,7 @@
 
 Hướng dẫn sử dụng tiếng Việt: [GUIDE-DOCSYNC.md](GUIDE-DOCSYNC.md).
 
-`wip-organizer.py` indexes proposed classifications for Documents/2026 and
+`wip-organizer.py` indexes proposed classifications for Documents/WIP & Reference and
 renders a local Kanban dashboard. It has no command that moves, copies,
 renames, deletes, or files a source document.
 
@@ -115,14 +115,14 @@ dossier ID and next action. `review_only` decisions remain manual filing work;
 marking a dossier approved does not enable automatic moves. Manual decisions
 survive subsequent scans while the file content remains unchanged. Changed
 content is classified again. The board reflects indexed scopes plus live direct
-files in the current-year root. Run `scan` to discover new nested WIP files.
+files in the WIP & Reference root. Run `scan` to discover new nested WIP files.
 
 The shell organizer enables managed rules by default for normal runs, including
 legacy invocations through the Tools symlink. UI, CLI, timer and watcher use the
 same organizer and a shared `flock`; a competing run exits 75 (busy) before any
 processing. Watcher busy/error results remain queued for retry.
 
-The watcher inspects direct intake files in the current-year root,
+The watcher inspects direct intake files in the WIP & Reference root,
 `00_INBOX`, `00_INBOX/Hoa don`, Documents and Downloads every 5 seconds. It waits for 20 seconds of stability,
 uses a 60-second cooldown and ignores temporary downloads. It supports all
 file types handled by the organizer, not only PDFs. Existing files at watcher
@@ -176,13 +176,13 @@ For an explicit structural migration, stop the watcher, timer and web app, check
 that the organizer is idle, then plan and review mappings:
 
 ```bash
-.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/2026" > /tmp/docsync-layout-plan.json
+.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/WIP & Reference" > /tmp/docsync-layout-plan.json
 ```
 
 After reviewing the mappings, run the authorized migration:
 
 ```bash
-.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/2026" --apply
+.venv-docsync/bin/python docsync_migrate_layout.py --year-root "$HOME/Documents/WIP & Reference" --apply
 ./docsync scan
 ```
 

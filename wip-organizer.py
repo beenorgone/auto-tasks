@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only first WIP indexing and Kanban reporting for Documents/2026.
+"""Read-only first WIP indexing and Kanban reporting for WIP & Reference.
 
 This tool deliberately has no move, delete, or filing command.  It records
 classification proposals in SQLite and renders a local, static dashboard so a
@@ -25,6 +25,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
+from docsync_paths import work_root
 from docsync_layout import (CATEGORY_TARGETS, REPORT_TARGETS, DIRECTORIES, SCOPES, LEGACY_SCOPES,
                             OLD_TARGETS, FOLDER_CATEGORIES, B2B_PRICES, B2B_RECONCILIATION,
                             within, approved_target, safe_directory)
@@ -32,7 +33,7 @@ from docsync_layout import (CATEGORY_TARGETS, REPORT_TARGETS, DIRECTORIES, SCOPE
 
 TOOL_ROOT = Path(__file__).resolve().parent
 DOCUMENTS_ROOT = TOOL_ROOT.parent
-YEAR_ROOT = DOCUMENTS_ROOT / "2026"
+YEAR_ROOT = work_root()
 STATE_DIR_NAME = ".wip"
 DEFAULT_SCOPES = (*SCOPES, *LEGACY_SCOPES)
 WIP_DIRECTORIES = DIRECTORIES
@@ -41,7 +42,8 @@ VALID_STATUSES = ("captured", "auto_classified", "needs_review", "in_progress", 
 DEFAULT_RULES = {
     "version": 9,
     "excluded_paths": [
-        "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
+        "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**",
+        "2026/2026-03/Adults/**", "2026/2026-03/Kids/**", "2026/2026-03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
         ".wip/**", "00_INBOX/.*/**",
     ],
     "generated_name_patterns": [r"^pdftohtml", r"^pdftotext", r"^text\.txt$", r"^agents\.md$"],
@@ -543,20 +545,20 @@ def dashboard(year_root: Path, output: Path | None = None) -> Path:
         board.append(f"<section class='column'><header><h2>{labels[status]}</h2><span>{len(by_status[status])}</span></header>{''.join(cards) or '<p class=empty>No dossier</p>'}</section>")
     total = sum(row["document_count"] for row in rows)
     output.write_text(f"""<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>2026 WIP Kanban</title><style>
+<title>WIP &amp; Reference · Kanban</title><style>
 *{{box-sizing:border-box}}body{{margin:0;background:#f6f7fb;color:#1c1b20;font:14px/1.45 Arial,sans-serif}}main{{padding:24px;max-width:2200px;margin:auto}}h1{{margin:0;font-size:28px}}.subtitle{{color:#5f6368}}.board{{display:grid;grid-template-columns:repeat(7,minmax(265px,1fr));gap:16px;overflow-x:auto;padding:8px 0 20px}}.column{{background:#eef0f7;border-radius:16px;padding:12px;min-height:280px}}.column header{{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 12px}}.column h2{{font-size:15px;margin:0}}.column header span{{background:#d9e2ff;color:#17386d;border-radius:999px;padding:2px 9px;font-weight:bold}}.card{{background:#fff;border-radius:12px;padding:13px;margin:10px 0;box-shadow:0 1px 3px #0002;border-left:4px solid #4f73c7}}.card h3{{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}}.category{{color:#4a5568;margin:0 0 8px;text-transform:capitalize}}.target{{background:#eef4ff;color:#174ea6;margin:0 -2px 9px;padding:5px 7px;border-radius:6px;overflow-wrap:anywhere}}.action{{background:#f4f7f8;margin:0 -2px 8px;padding:6px 7px;border-radius:6px}}.evidence{{color:#4a5568;font-size:12px;margin:0 0 8px;overflow-wrap:anywhere}}.paths{{color:#5f6368;font-size:12px;margin:0;overflow-wrap:anywhere}}.more,.empty{{color:#697386;font-style:italic}}@media(max-width:700px){{main{{padding:16px}}.board{{grid-template-columns:repeat(7,84vw)}}}}</style>
-<main><h1>2026 WIP Kanban</h1><p class='subtitle'>{len(rows)} dossiers · {total} active documents · Index only: no file has been moved or deleted.</p><div class='board'>{''.join(board)}</div></main>""", encoding="utf-8")
+<main><h1>WIP &amp; Reference · Kanban</h1><p class='subtitle'>{len(rows)} dossiers · {total} active documents · Index only: no file has been moved or deleted.</p><div class='board'>{''.join(board)}</div></main>""", encoding="utf-8")
     return output
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--year-root", type=Path, default=YEAR_ROOT, help="2026 folder; defaults to Documents/2026")
+    result.add_argument("--root", "--year-root", dest="year_root", type=Path, default=YEAR_ROOT, help="defaults to Documents/WIP & Reference")
     sub = result.add_subparsers(dest="command", required=True)
     sub.add_parser("init", help="Create empty WIP folders, state database and editable rules.json")
     scan_parser = sub.add_parser("scan", help="Index files only; never moves, renames, copies or deletes")
     scan_parser.add_argument("--source", action="append", default=[], help="relative folder or file to index; repeatable")
-    scan_parser.add_argument("--no-root-files", action="store_true", help="do not include loose files directly under 2026")
+    scan_parser.add_argument("--no-root-files", action="store_true", help="do not include loose files directly under the work root")
     dash = sub.add_parser("dashboard", help="Render a static Material-style Kanban HTML page")
     dash.add_argument("--output", type=Path)
     status = sub.add_parser("set-status", help="Update a dossier status in the index; does not touch documents")

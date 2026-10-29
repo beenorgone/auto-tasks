@@ -7,10 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 from docsync_core import ROOT, WIP, STAGES, LABELS, board, health
+from docsync_paths import work_root
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='DocSync: scan → board → review → preview → apply → verify')
-    parser.add_argument('--year-root', type=Path, default=Path.home() / 'Documents' / str(WIP.dt.date.today().year))
+    parser.add_argument('--root', '--year-root', dest='year_root', type=Path, default=work_root(),
+                        help='WIP & Reference root (--year-root remains an alias)')
     sub = parser.add_subparsers(dest='command')
     for name in ('board', 'status'):
         p = sub.add_parser(name)
@@ -35,8 +37,8 @@ def main(argv=None):
     root = args.year_root.resolve()
     command = args.command or 'board'
     if command in ('preview', 'apply'):
-        if root != (Path.home() / 'Documents' / str(WIP.dt.date.today().year)).resolve():
-            parser.error('preview/apply only support the current-year Documents root')
+        if root != work_root().resolve():
+            parser.error('preview/apply only support the configured WIP & Reference root')
         flags = ['--plan-managed-rules'] if command == 'preview' else ['--apply-managed-rules']
         if command == 'preview' or not args.sync_project:
             flags.append('--no-sync')

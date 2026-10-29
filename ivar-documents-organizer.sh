@@ -26,8 +26,11 @@ CURRENT_DATE="${CURRENT_DATE:-$(date '+%Y-%m-%d')}"
 CURRENT_YEAR=$(printf '%s' "$CURRENT_DATE" | cut -d- -f1)
 CURRENT_MONTH=$(printf '%s' "$CURRENT_DATE" | cut -d- -f2)
 CURRENT_DAY=$(printf '%s' "$CURRENT_DATE" | cut -d- -f3)
-CURRENT_YEAR_ROOT="${DOCS_ROOT}/${CURRENT_YEAR}"
-CURRENT_MONTH_ROOT="${DOCS_ROOT}/${CURRENT_YEAR}/${CURRENT_MONTH}"
+# Keep the legacy variable name for the shared intake/routing helpers. The work
+# root is stable across years; only monthly archives are partitioned by year.
+WORK_ROOT="${DOCSYNC_ROOT:-${DOCS_ROOT}/WIP & Reference}"
+CURRENT_YEAR_ROOT="$WORK_ROOT"
+CURRENT_MONTH_ROOT="${WORK_ROOT}/${CURRENT_YEAR}/${CURRENT_YEAR}-${CURRENT_MONTH}"
 DRY_RUN=0
 QUIET=0
 DEEP_MODE=0
@@ -55,10 +58,10 @@ Options:
   --plan-managed-rules
               Read-only: ask the
               WIP rule engine for managed routes (VAT, Shopee reports, GHTK
-              reports, SAOKE) for loose files in the current year root.
+              reports, SAOKE) for loose files in the WIP & Reference root.
               Never renames or moves files.
   --apply-managed-rules
-              Move loose files in the current year root that match an
+              Move loose files in the WIP & Reference root that match an
               approved managed route (VAT, Shopee reports, GHTK reports,
               SAOKE) into its 20_BAO_CAO destination. Legacy folders are
               moved only by the separately audited layout migration.
@@ -247,10 +250,51 @@ db_exec() {
   python3 - "$DB_PATH" "$@" <<'PY'
 import sqlite3
 import sys
+import hashlib
+from pathlib import Path
 
 db_path = sys.argv[1]
 args = sys.argv[2:]
 mode = args[0]
+
+# Duplicate previews must use the same evidence as Apply, without creating or
+# updating the state DB. Old records alone do not prove the archive still exists.
+if mode == "find-sha":
+    sha, file_size, source_path = args[1:4]
+    db = Path(db_path)
+    if not db.is_file():
+        raise SystemExit
+    conn = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='processed_files'").fetchone():
+        raise SystemExit
+    rows = conn.execute(
+        """
+        SELECT DISTINCT final_path
+        FROM processed_files
+        WHERE sha256 = ? AND file_size = ?
+          AND status IN ('unc', 'invoice', 'invoice-xml')
+        """,
+        (sha, int(file_size)),
+    )
+    for (final_path,) in rows:
+        if not final_path:
+            continue
+        target = Path(final_path)
+        try:
+            if target.is_symlink() or not target.is_file() or target.samefile(source_path):
+                continue
+            if target.stat().st_size != int(file_size):
+                continue
+            digest = hashlib.sha256()
+            with target.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            if digest.hexdigest() == sha:
+                print(final_path)
+                break
+        except OSError:
+            continue
+    raise SystemExit
 
 conn = sqlite3.connect(db_path)
 conn.execute(
@@ -292,22 +336,6 @@ if mode == "seen-source":
         (source_path, source_mtime, file_size),
     ).fetchone()
     print("1" if row else "0")
-elif mode == "find-sha":
-    sha = args[1]
-    row = conn.execute(
-        """
-        SELECT final_path, status
-        FROM processed_files
-        WHERE sha256 = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (sha,),
-    ).fetchone()
-    if row:
-        print((row[0] or "") + "\t" + (row[1] or ""))
-    else:
-        print("")
 elif mode == "insert":
     (
         source_path,
@@ -362,11 +390,7 @@ db_seen_source() {
 }
 
 db_find_sha() {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    printf '\n'
-    return 0
-  fi
-  db_exec "find-sha" "$1"
+  db_exec "find-sha" "$1" "$2" "$3"
 }
 
 db_insert() {
@@ -1409,16 +1433,18 @@ classify_general_bucket() {
 
 move_to_duplicate() {
   source_path=$1
-  year=$2
-  month=$3
-  sha=$4
-  note=$5
-  dup_dir="${DOCS_ROOT}/${year}/${month}/duplicates"
-  ensure_dir "$dup_dir"
+  sha=$2
+  note=$3
+  dup_dir="${CURRENT_YEAR_ROOT}/duplicates"
+  if [ -L "$dup_dir" ]; then
+    error "Refusing symlink duplicate folder: $dup_dir"
+    return 1
+  fi
+  ensure_dir "$dup_dir" || return 1
   base=$(basename "$source_path")
   target="${dup_dir}/${base}"
 
-  if [ -e "$target" ]; then
+  if [ -e "$target" ] || [ -L "$target" ]; then
     stem=${base%.*}
     ext=${base##*.}
     if [ "$stem" = "$ext" ]; then
@@ -1427,12 +1453,56 @@ move_to_duplicate() {
       ext=".${ext}"
     fi
     target="${dup_dir}/${stem}_${sha}${ext}"
+    suffix=1
+    while [ -e "$target" ] || [ -L "$target" ]; do
+      target="${dup_dir}/${stem}_${sha}_${suffix}${ext}"
+      suffix=$((suffix + 1))
+    done
   fi
 
-  run_cmd mv "$source_path" "$target"
+  run_cmd mv "$source_path" "$target" || return 1
   info "Moved duplicate to $target ($note)"
   printf '%s\n' "$target"
 }
+
+# Run in a subshell so XML sidecar checks cannot replace the caller's PDF
+# metadata. Keep every duplicate for later cleanup; never overwrite a copy.
+quarantine_accounting_duplicate() (
+  source_path=$1
+  file_mtime=$2
+  file_size=$3
+  sha=$4
+  existing_target=$5
+  [ "$source_path" != "$existing_target" ] || return 1
+  [ -f "$existing_target" ] && [ ! -L "$existing_target" ] || return 1
+  [ "$(file_size_of "$existing_target")" = "$file_size" ] || return 1
+  [ "$(sha256_file "$existing_target")" = "$sha" ] || return 1
+  duplicate_target=$(move_to_duplicate "$source_path" "$sha" "$existing_target") || {
+    warn "Duplicate kept for review because quarantine failed: $source_path"
+    return 0
+  }
+  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "" "" "" "" "$existing_target"
+)
+
+quarantine_matching_invoice_xml() (
+  pdf_source=$1
+  archived_pdf=$2
+  source_stem=${pdf_source%.*}
+  for xml_source in "${source_stem}.xml" "${source_stem}.XML"; do
+    [ -f "$xml_source" ] || continue
+    xml_size=$(file_size_of "$xml_source")
+    xml_mtime=$(file_mtime_of "$xml_source")
+    xml_sha=$(sha256_file "$xml_source")
+    xml_archive=$(db_find_sha "$xml_sha" "$xml_size" "$xml_source")
+    for xml_target in "$xml_archive" \
+      "$(dirname "$archived_pdf")/$(basename "$xml_source")" \
+      "${archived_pdf%.*}.xml" "${archived_pdf%.*}.XML"; do
+      if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target"; then
+        break
+      fi
+    done
+  done
+)
 
 record_processed() {
   source_path=$1
@@ -1732,7 +1802,7 @@ invoice_dest_dir_for_metadata() {
   fi
 }
 
-move_matching_invoice_xml() {
+move_matching_invoice_xml() (
   pdf_source=$1
   dest_dir=$2
   invoice_year=$3
@@ -1760,6 +1830,9 @@ move_matching_invoice_xml() {
   xml_mtime=$(file_mtime_of "$xml_source")
   xml_size=$(file_size_of "$xml_source")
   xml_target="${dest_dir}/$(basename "$xml_source")"
+  if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target"; then
+    return 0
+  fi
   if [ -e "$xml_target" ]; then
     xml_target="${dest_dir}/${xml_sha}_$(basename "$xml_source")"
   fi
@@ -1768,7 +1841,7 @@ move_matching_invoice_xml() {
   info "Moved matching invoice XML -> $xml_target"
   record_processed "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target" "invoice-xml" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no" "matching-pdf"
   vendor_db_upsert "$vendor_name" "$vendor_tax" "$invoice_year" "$invoice_month" "$xml_source" "$xml_target"
-}
+)
 
 process_po_document() {
   source_path=$1
@@ -1783,9 +1856,9 @@ process_po_document() {
     po_year=$(date -d "$filename_date" '+%Y')
   else
     po_year=$CURRENT_YEAR
-    warn "PO filename has no single valid YYYY-MM-DD date; routing to current-year purchase reports: $source_path"
+    warn "PO filename has no single valid YYYY-MM-DD date; routing to purchase reports: $source_path"
   fi
-  dest_dir="${DOCS_ROOT}/${po_year}/20_BAO_CAO/Nhap hang"
+  dest_dir="${WORK_ROOT}/20_BAO_CAO/Nhap hang"
   ensure_dir "$dest_dir"
   target="${dest_dir}/$(basename "$source_path")"
   if [ -e "$target" ]; then
@@ -1836,6 +1909,9 @@ process_unc_pdf() {
   ensure_dir "$move_dir"
   dest_name=$(build_unc_filename "$text_file" "$source_path")
   target="${move_dir}/${dest_name}"
+  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target"; then
+    return 0
+  fi
   if [ -e "$target" ]; then
     stem=${dest_name%.*}
     ext=${dest_name##*.}
@@ -1916,6 +1992,10 @@ process_invoice_pdf() {
 
   dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
   target="${dest_dir}/${dest_name}"
+  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target"; then
+    move_matching_invoice_xml "$source_path" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
+    return 0
+  fi
   if [ -e "$target" ]; then
     target="${dest_dir}/${sha}_$(basename "$target")"
   fi
@@ -1942,6 +2022,9 @@ process_invoice_xml() {
 
   dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
   target="${dest_dir}/${dest_name}"
+  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target"; then
+    return 0
+  fi
   if [ -e "$target" ]; then
     target="${dest_dir}/${sha}_$(basename "$target")"
   fi
@@ -1970,7 +2053,7 @@ maybe_rollover_previous_month() {
 
     prev_year=$(printf '%s' "$prev_month_date" | cut -d- -f1)
     prev_month=$(printf '%s' "$prev_month_date" | cut -d- -f2)
-    prev_root="${DOCS_ROOT}/${prev_year}/${prev_month}"
+    prev_root="${WORK_ROOT}/${prev_year}/${prev_year}-${prev_month}"
   fi
 
   if [ ! -d "$prev_root" ]; then
@@ -2165,11 +2248,16 @@ process_source_file() {
     return 0
   fi
 
-  dup_record=$(db_find_sha "$sha")
+  # Only archived accounting documents participate. General/monthly files no
+  # longer have a rule that diverts equal content into a duplicates folder.
+  dup_record=$(db_find_sha "$sha" "$file_size" "$source_path")
   if [ -n "$dup_record" ]; then
-    duplicate_target=$(move_to_duplicate "$source_path" "$CURRENT_YEAR" "$CURRENT_MONTH" "$sha" "$dup_record")
-    record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$dup_record"
-    return 0
+    if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$dup_record"; then
+      case "$route_file_lower" in
+        *.pdf) quarantine_matching_invoice_xml "$source_path" "$dup_record" ;;
+      esac
+      return 0
+    fi
   fi
 
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
@@ -2364,12 +2452,12 @@ scan_current_month() {
   trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
 
   if [ -d "$CURRENT_YEAR_ROOT" ]; then
-    info "Scanning loose files in current year root: $CURRENT_YEAR_ROOT"
+    info "Scanning loose files in WIP & Reference root: $CURRENT_YEAR_ROOT"
     find "$CURRENT_YEAR_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
       process_source_file "$source_path" "$tmp_root"
     done
   else
-    warn "Current year folder not found: $CURRENT_YEAR_ROOT"
+    warn "WIP & Reference folder not found: $CURRENT_YEAR_ROOT"
   fi
 
   if [ -d "${CURRENT_YEAR_ROOT}/00_INBOX" ]; then
@@ -2733,7 +2821,7 @@ main() {
 
   info "=== IVAR Accounting File Sync ==="
   info "Date: $CURRENT_DATE"
-  info "Source year root: $CURRENT_YEAR_ROOT"
+  info "Source work root: $CURRENT_YEAR_ROOT"
   info "Destination root: $IVAR_DATA"
   info "State DB: $DB_PATH"
   info "Vendor DB: $VENDOR_DB_PATH"

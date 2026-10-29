@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from docsync_core import board, health
+from docsync_paths import work_root
 import sqlite3
 
 
@@ -42,7 +43,7 @@ class RunState:
     ) -> None:
         self.script = script
         self.wip_script = wip_script
-        self.year_root = year_root or DOCUMENTS_ROOT / str(dt.date.today().year)
+        self.year_root = year_root or work_root()
         self.dashboard_path = self.year_root / ".wip" / "dashboard.html"
         self.health_cache = {}
         self.health_cached_at = 0.0
@@ -87,7 +88,7 @@ class RunState:
         if not self.wip_script.is_file():
             return False, f"WIP rule engine is unavailable: {self.wip_script}"
         if not self.year_root.is_dir():
-            return False, f"Current-year document folder is unavailable: {self.year_root}"
+            return False, f"WIP & Reference folder is unavailable: {self.year_root}"
         with self.lock:
             if self.running:
                 return False, "A document sync run is already in progress."

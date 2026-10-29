@@ -12,7 +12,7 @@ TMP_HOME=$(mktemp -d "${TMPDIR:-/tmp}/ivar-managed-routes-test.XXXXXX")
 cleanup() { rm -rf "$TMP_HOME"; }
 trap cleanup EXIT INT TERM
 
-YEAR_ROOT="${TMP_HOME}/Documents/2026"
+YEAR_ROOT="${TMP_HOME}/Documents/WIP & Reference"
 IVAR_DATA_DIR="${TMP_HOME}/ivar-data"
 STATE_DIR_TEST="${TMP_HOME}/state"
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Debounced non-recursive intake watcher with bounded polling and retry."""
 import docsync_purchase as PURCHASE
-import datetime as dt
 import subprocess
 import time
 from pathlib import Path
+from docsync_paths import work_root
 
 ROOT = Path(__file__).resolve().parent
 POLL_SECONDS = 5
@@ -49,7 +49,7 @@ class Queue:
 def main():
     home = Path.home()
     def roots():
-        year = home / 'Documents' / str(dt.date.today().year)
+        year = work_root(home)
         return [year, year / '00_INBOX', year / '00_INBOX/Hoa don', home / 'Documents', home / 'Downloads']
     def current():
         return {**snapshot(roots()), **PURCHASE.snapshot(PURCHASE.purchase_root(home))}

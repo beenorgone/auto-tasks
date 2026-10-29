@@ -1,15 +1,22 @@
+> Từ 29/10/2026, thư mục làm việc mặc định là `~/Documents/WIP & Reference`.
+> Các thư mục tháng cũ được giữ dưới `2026/2026-MM` (ví dụ `2026/2026-10`).
+> Từ các năm sau, rule gom tháng dùng `<năm>/<năm>-<MM>` trong cùng gốc này.
+> Hồ sơ, báo cáo, `00_INBOX`, `.wip` và `duplicates` nằm trực tiếp ở gốc.
+> CLI, web và watcher cùng dùng gốc mặc định này; có thể cấu hình bằng `DOCSYNC_ROOT`.
+> `docsync --root <path>` và tên tham số cũ `--year-root` đều được hỗ trợ.
+
 # Hướng dẫn DocSync
 
 DocSync nhận diện và sắp xếp tài liệu, theo dõi hồ sơ trên Kanban và hiển thị việc cần làm tiếp theo. Có thể sử dụng bằng terminal hoặc giao diện web cục bộ.
 
 - Thư mục chương trình: `/home/beenorgone/Documents/.auto-tasks`
 - Giao diện web: <http://127.0.0.1:8787>
-- Thư mục tài liệu mặc định: `~/Documents/<năm hiện tại>`; trong năm 2026 là `~/Documents/2026`.
+- Thư mục tài liệu mặc định: `~/Documents/WIP & Reference` (dùng chung qua các năm).
 
-## Cấu trúc thư mục từ phiên bản rule 9
+## Cấu trúc thư mục từ 29/10/2026
 
 ```text
-2026/
+WIP & Reference/
 ├── 00_INBOX/Hoa don/
 ├── 10_HO_SO/
 │   ├── Ke toan/
@@ -32,7 +39,9 @@ DocSync nhận diện và sắp xếp tài liệu, theo dõi hồ sơ trên Kanb
 ├── 90_CACH_LY_KY_THUAT/
 ├── 99_NHAT_KY/
 ├── Others/
-├── 01/ ... 12/                 # Giữ các thư mục tháng hiện có
+├── 2026/
+│   └── 2026-01/ ... 2026-10/   # Các tháng đã có
+├── duplicates/                 # UNC/hóa đơn trùng, chờ dọn sau
 └── .wip/
 ```
 
@@ -144,7 +153,9 @@ docsync status
 
 Ngoài 4 rule managed, Apply còn chạy các bộ xử lý kế toán hiện có: hóa đơn, UNC, PO/MO, xử lý trùng và tiếp nhận file. Các quy tắc cũ như dọn log ở gốc năm và gom file theo kỳ vẫn thuộc organizer.
 
-Tài liệu PO rời được lưu tại `<Documents>/<năm>/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới tại thư mục tiếp nhận được giữ lại để kiểm tra nhóm nhập khẩu/trong nước, trước cả bước xử lý trùng; không tự suy đoán nhóm.
+UNC và hóa đơn (PDF/XML) đã có bản lưu chỉ được coi là trùng khi khớp cả dung lượng và SHA-256 với file đích còn tồn tại. Bản trùng được giữ tại `<Documents>/WIP & Reference/duplicates` để dọn sau; không ghi đè bản đã có và không xóa bản trùng. Preview kiểm tra cùng điều kiện nhưng không chuyển file. Không còn rule gom các file thông thường trùng nội dung vào `<năm>/<tháng>/duplicates`; các thư mục duplicates tháng đã có được giữ nguyên.
+
+Tài liệu PO rời được lưu tại `<Documents>/WIP & Reference/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới tại thư mục tiếp nhận được giữ lại để kiểm tra nhóm nhập khẩu/trong nước, trước cả bước xử lý trùng; không tự suy đoán nhóm.
 
 Chỉ khi muốn chạy thêm đồng bộ project ra ngoài bằng rclone:
 
@@ -281,13 +292,13 @@ docsync status --json
 
 Với `board --stage ... --json`, danh sách `cards` được lọc; `counts` vẫn là số lượng toàn bảng. `--limit` chỉ giới hạn cách in bảng dạng văn bản.
 
-Đọc chỉ mục của một năm khác bằng tùy chọn đặt trước tên lệnh:
+Chọn thư mục chỉ mục bằng tùy chọn đặt trước tên lệnh:
 
 ```bash
-docsync --year-root "$HOME/Documents/2026" board
+docsync --root "$HOME/Documents/WIP & Reference" board
 ```
 
-Preview/Apply chỉ hỗ trợ thư mục năm hiện tại. `status` phản ánh các dịch vụ chung của máy.
+Preview/Apply chỉ hỗ trợ gốc làm việc đang cấu hình (`DOCSYNC_ROOT`, mặc định là `WIP & Reference`). `--year-root` vẫn là tên tham số tương thích. `status` phản ánh các dịch vụ chung của máy.
 
 Hướng dẫn cài đặt môi trường, triển khai dịch vụ và chạy kiểm thử: [README-wip-organizer.md](README-wip-organizer.md).
 

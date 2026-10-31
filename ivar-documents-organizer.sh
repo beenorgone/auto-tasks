@@ -1597,6 +1597,10 @@ norm_text = strip_accents(text)
 
 unc_no = ""
 no_patterns = [
+    # ACB payment orders label the transfer number as "Số/ No.". Match
+    # this before the generic Account No. field so we do not use the
+    # applicant's bank account number as the UNC number.
+    r"\bSo\s*/\s*No\s*[:.]?\s*([A-Z0-9][A-Z0-9._/-]*)",
     r"\bSo\s*No\s*:\s*([A-Z0-9][A-Z0-9._/-]*)",
     r"\bNo\s*:\s*([A-Z0-9][A-Z0-9._/-]*)",
 ]
@@ -1627,7 +1631,7 @@ for idx, line in enumerate(lines):
         continue
 
     candidate = re.sub(
-        r"(?i)\b(nội\s*dung|noi\s*dung|remarks?)\b\s*(?:/+\s*(?:remarks?|nội\s*dung|noi\s*dung))?\s*:?",
+        r"(?i)\b(nội\s*dung|noi\s*dung|details?|remarks?)\b\s*(?:/+\s*(?:details?|remarks?|nội\s*dung|noi\s*dung))?\s*:?",
         "",
         line,
     )

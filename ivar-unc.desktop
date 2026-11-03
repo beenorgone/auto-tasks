@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=IVAR UNC
+Comment=Tra cứu ủy nhiệm chi theo phân loại, tài khoản và PO
+Exec=/bin/bash /home/beenorgone/Documents/.auto-tasks/start-unc-app.sh
+Icon=accessories-calculator
+Terminal=false
+Categories=Office;Finance;
+StartupNotify=true

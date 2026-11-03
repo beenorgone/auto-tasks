@@ -12,3 +12,6 @@ gmail_brief/briefs/
 ivar-documents-organizer/organizer.lock
 output/playwright/
 .playwright-cli/
+ivar-documents-organizer/unc.db
+ivar-documents-organizer/unc.db-wal
+ivar-documents-organizer/unc.db-shm

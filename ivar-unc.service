@@ -1,0 +1,16 @@
+[Unit]
+Description=IVAR UNC local database browser
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/.auto-tasks
+ExecStart=/usr/bin/python3 -u %h/Documents/.auto-tasks/unc_tool.py serve --host 127.0.0.1 --port 8788
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=default.target

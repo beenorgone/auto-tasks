@@ -1,0 +1,9 @@
+[Unit]
+Description=DocSync purchase classification and Telegram decisions
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/Documents/.auto-tasks/docsync_telegram.py
+TimeoutStartSec=120
+UMask=0077

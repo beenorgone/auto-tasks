@@ -41,7 +41,7 @@ WIP & Reference/
 ├── Others/
 ├── 2026/
 │   └── 2026-01/ ... 2026-10/   # Các tháng đã có
-├── duplicates/                 # UNC/hóa đơn trùng, chờ dọn sau
+├── duplicates/                 # UNC trùng, chờ dọn sau
 └── .wip/
 ```
 
@@ -153,9 +153,9 @@ docsync status
 
 Ngoài 4 rule managed, Apply còn chạy các bộ xử lý kế toán hiện có: hóa đơn, UNC, PO/MO, xử lý trùng và tiếp nhận file. Các quy tắc cũ như dọn log ở gốc năm và gom file theo kỳ vẫn thuộc organizer.
 
-UNC và hóa đơn (PDF/XML) đã có bản lưu chỉ được coi là trùng khi khớp cả dung lượng và SHA-256 với file đích còn tồn tại. Bản trùng được giữ tại `<Documents>/WIP & Reference/duplicates` để dọn sau; không ghi đè bản đã có và không xóa bản trùng. Preview kiểm tra cùng điều kiện nhưng không chuyển file. Không còn rule gom các file thông thường trùng nội dung vào `<năm>/<tháng>/duplicates`; các thư mục duplicates tháng đã có được giữ nguyên.
+UNC và hóa đơn (PDF/XML) đã có bản lưu chỉ được coi là trùng khi khớp cả dung lượng và SHA-256 với file đích còn tồn tại. UNC trùng được giữ tại `<Documents>/WIP & Reference/duplicates`; hóa đơn trùng được đổi tên ngay cạnh nguồn với hậu tố `_duplicate` và số tránh trùng tên. Không ghi đè bản đã có và không xóa bản trùng. Preview kiểm tra cùng điều kiện nhưng không chuyển file. Không còn rule gom các file thông thường trùng nội dung vào `<năm>/<tháng>/duplicates`; các thư mục duplicates tháng đã có được giữ nguyên.
 
-Tài liệu PO rời được lưu tại `<Documents>/WIP & Reference/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới tại thư mục tiếp nhận được giữ lại để kiểm tra nhóm nhập khẩu/trong nước, trước cả bước xử lý trùng; không tự suy đoán nhóm.
+Tài liệu PO rời được lưu tại `<Documents>/WIP & Reference/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới bỏ qua bộ xử lý PO/trùng chung và được chuyển nguyên bộ khi lịch sử NCC có nhóm nhất quán. Trường hợp chưa rõ được giữ lại và gửi Telegram khi đã cấu hình cầu nối bên dưới.
 
 Chỉ khi muốn chạy thêm đồng bộ project ra ngoài bằng rclone:
 
@@ -317,3 +317,19 @@ Nếu đặt `IVAR_DATA`, rule dùng thư mục `ho so mua vao` bên trong đư�
 - Watcher kiểm tra thêm các năm, nhóm và thư mục quý/tháng trong phạm vi trên mỗi 5 giây; theo dõi thay đổi của file đính kèm trong bộ hồ sơ và chờ yên 20 giây. Không quét các nhánh tùy ý ngoài cấu trúc này.
 - Không ghi đè đích, không đi qua symlink, không chuyển bộ hồ sơ còn `.part`, `.crdownload`, `.tmp`. Hồ sơ có sẵn lúc watcher khởi động vẫn chờ Apply/timer hoặc thay đổi mới.
 - Rule chỉ sắp xếp thư mục local; không bật thêm rclone. Lượt `--rescan-unc` không áp dụng rule này.
+
+### ZIP mới và quyết định Telegram
+
+- Nhận ZIP `ho so PO… - YYYY-MM-DD - NCC ….zip` tại gốc WIP, `00_INBOX` (kể cả thư mục con), gốc Documents và Downloads.
+- Chỉ so tên NCC đầy đủ, chuẩn hóa Unicode và chữ hoa/thường. Không ghép gần đúng. Chỉ dùng hồ sơ đã lưu đúng tháng trong nhóm `nhap khau` hoặc `trong nuoc`; lịch sử không có nhóm không phải căn cứ suy luận.
+- Nếu mọi hồ sơ lịch sử có cùng nhóm, tự chuyển theo năm/tháng trên tên ZIP. Nếu không có lịch sử hoặc có cả hai nhóm, giữ lại chờ bạn quyết định.
+- Kanban dùng chung đề xuất, lý do và đích; yêu cầu đã gửi Telegram ở trạng thái `waiting_external`. Không ghi đè; ghi SHA-256, căn cứ lịch sử và nguồn/đích trong `purchase-months.jsonl`.
+- Cầu nối `docsync_telegram.py` dùng SSH và WP-CLI tới bot ERP đã cấu hình. Token bot không được sao chép về máy local. Mã nguồn MU plugin: `telegram/docsync-telegram.php`, cài tại `wp-content/mu-plugins/ivar-docsync-telegram.php` trên ERP.
+- Cấu hình local, không commit: `ivar-documents-organizer/purchase-telegram.json`, gồm `host`, `wp_path`, `login` (đúng tài khoản ERP), `bot` (username không có @). Phải có liên kết Telegram đã được ERP duyệt và SSH hoạt động bằng khóa.
+- Cài hai unit `systemd/docsync-telegram.{service,timer}` vào `~/.config/systemd/user/`, chạy `systemctl --user daemon-reload` rồi `systemctl --user enable --now docsync-telegram.timer`. Timer kiểm tra mỗi phút; dùng khóa organizer chung và chờ file yên ít nhất 20 giây. Dừng bằng `systemctl --user disable --now docsync-telegram.timer`.
+- Bot gửi mã riêng cho từng file. Trả lời `/docsync MÃ trong_nuoc`, `/docsync MÃ nhap_khau` hoặc `/docsync MÃ giu_lai`. Chỉ tài khoản liên kết sở hữu yêu cầu được quyết định, một lần, trong 7 ngày. Lệnh không gọi AI và không sửa dữ liệu PO của ERP.
+- Phê duyệt gắn với SHA-256 đúng file; file đổi thì cần yêu cầu mới. `giu_lai` tiếp tục có hiệu lực dù về sau xuất hiện lịch sử NCC. Đích trùng/ngày không hợp lệ vẫn cần xử lý riêng, không được vượt qua bằng cách chọn nhóm.
+- Trạng thái và chống gửi lặp lưu tại `purchase-telegram-state.json` (không commit). Đề xuất ERP hết hạn sau 7 ngày, tự dọn sau 30 ngày. Yêu cầu hết hạn giữ nguyên file; cần tạo lại trạng thái yêu cầu sau khi kiểm tra.
+- Máy local phải đang chạy và có mạng để nhận quyết định. Bot xác nhận **đã ghi nhận** trước; sau khi chuyển và kiểm tra hash, bot mới báo **đã chuyển**. Không bật đồng bộ Drive.
+
+Hướng dẫn kỹ thuật: [triển khai, setup, logic, nghiệm thu và rollback](docs/DOCSYNC-DEPLOYMENT.md).

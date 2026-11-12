@@ -1,0 +1,9 @@
+[Unit]
+Description=Check DocSync purchase decisions every minute
+
+[Timer]
+OnStartupSec=45s
+OnUnitInactiveSec=60s
+
+[Install]
+WantedBy=timers.target

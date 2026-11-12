@@ -261,6 +261,7 @@ mode = args[0]
 # updating the state DB. Old records alone do not prove the archive still exists.
 if mode == "find-sha":
     sha, file_size, source_path = args[1:4]
+    invoice_only = len(args) > 4 and args[4] == "invoice"
     db = Path(db_path)
     if not db.is_file():
         raise SystemExit
@@ -273,8 +274,9 @@ if mode == "find-sha":
         FROM processed_files
         WHERE sha256 = ? AND file_size = ?
           AND status IN ('unc', 'invoice', 'invoice-xml')
+          AND (? = 0 OR status IN ('invoice', 'invoice-xml'))
         """,
-        (sha, int(file_size)),
+        (sha, int(file_size), int(invoice_only)),
     )
     for (final_path,) in rows:
         if not final_path:
@@ -390,7 +392,7 @@ db_seen_source() {
 }
 
 db_find_sha() {
-  db_exec "find-sha" "$1" "$2" "$3"
+  db_exec "find-sha" "$@"
 }
 
 db_insert() {
@@ -1465,6 +1467,26 @@ move_to_duplicate() {
   printf '%s\n' "$target"
 }
 
+# Keep verified VAT duplicates beside their source, with collision-safe names.
+mark_invoice_duplicate() (
+  source_path=$1
+  sha=$2
+  note=$3
+  base=$(basename "$source_path")
+  stem=${base%.*}
+  ext=${base##*.}
+  if [ "$stem" = "$ext" ]; then ext=""; else ext=".${ext}"; fi
+  target="$(dirname "$source_path")/${stem}_duplicate${ext}"
+  suffix=1
+  while [ -e "$target" ] || [ -L "$target" ]; do
+    target="$(dirname "$source_path")/${stem}_duplicate_${suffix}${ext}"
+    suffix=$((suffix + 1))
+  done
+  run_cmd mv "$source_path" "$target" || return 1
+  info "Marked duplicate invoice: $target ($note)"
+  printf '%s\n' "$target"
+)
+
 # Run in a subshell so XML sidecar checks cannot replace the caller's PDF
 # metadata. Keep every duplicate for later cleanup; never overwrite a copy.
 quarantine_accounting_duplicate() (
@@ -1477,11 +1499,16 @@ quarantine_accounting_duplicate() (
   [ -f "$existing_target" ] && [ ! -L "$existing_target" ] || return 1
   [ "$(file_size_of "$existing_target")" = "$file_size" ] || return 1
   [ "$(sha256_file "$existing_target")" = "$sha" ] || return 1
-  duplicate_target=$(move_to_duplicate "$source_path" "$sha" "$existing_target") || {
+  duplicate_action=move_to_duplicate
+  if [ "${6:-}" = "invoice" ]; then duplicate_action=mark_invoice_duplicate; fi
+  duplicate_target=$("$duplicate_action" "$source_path" "$sha" "$existing_target") || {
     warn "Duplicate kept for review because quarantine failed: $source_path"
     return 0
   }
   record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "" "" "" "" "$existing_target"
+  if [ "${6:-}" = "invoice" ]; then
+    record_processed "$duplicate_target" "$file_mtime" "$file_size" "$sha" "$duplicate_target" "duplicate" "$CURRENT_YEAR" "" "" "" "" "$existing_target"
+  fi
 )
 
 quarantine_matching_invoice_xml() (
@@ -1497,7 +1524,7 @@ quarantine_matching_invoice_xml() (
     for xml_target in "$xml_archive" \
       "$(dirname "$archived_pdf")/$(basename "$xml_source")" \
       "${archived_pdf%.*}.xml" "${archived_pdf%.*}.XML"; do
-      if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target"; then
+      if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target" invoice; then
         break
       fi
     done
@@ -1834,7 +1861,7 @@ move_matching_invoice_xml() (
   xml_mtime=$(file_mtime_of "$xml_source")
   xml_size=$(file_size_of "$xml_source")
   xml_target="${dest_dir}/$(basename "$xml_source")"
-  if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target"; then
+  if quarantine_accounting_duplicate "$xml_source" "$xml_mtime" "$xml_size" "$xml_sha" "$xml_target" invoice; then
     return 0
   fi
   if [ -e "$xml_target" ]; then
@@ -1996,7 +2023,7 @@ process_invoice_pdf() {
 
   dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
   target="${dest_dir}/${dest_name}"
-  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target"; then
+  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target" invoice; then
     move_matching_invoice_xml "$source_path" "$dest_dir" "$invoice_year" "$invoice_month" "$vendor_name" "$vendor_tax" "$invoice_no"
     return 0
   fi
@@ -2026,7 +2053,7 @@ process_invoice_xml() {
 
   dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
   target="${dest_dir}/${dest_name}"
-  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target"; then
+  if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$target" invoice; then
     return 0
   fi
   if [ -e "$target" ]; then
@@ -2185,11 +2212,11 @@ process_source_file() {
     return 0
   fi
 
-  # A complete purchase dossier is not a PO report. Without its archive
-  # context we cannot infer nhap khau/trong nuoc. Hold it for review before
-  # duplicate detection or the generic PO handler can move it elsewhere.
+  # Whole dossiers bypass generic PO/duplicate handlers. The shared purchase
+  # phase below resolves an exact supplier's unanimous archive history once
+  # per run, keeping unknown/conflicting groups in review.
   if basename "$source_path" | grep -Eqi '^ho so [Pp][Oo][[:space:]_-]*[0-9]+.*\.zip$'; then
-    info "REVIEW purchase dossier ZIP: keep in intake until purchase archive group is confirmed: $source_path"
+    info "Purchase dossier ZIP: defer to shared purchase intake classifier: $source_path"
     return 0
   fi
 
@@ -2254,6 +2281,15 @@ process_source_file() {
 
   # Only archived accounting documents participate. General/monthly files no
   # longer have a rule that diverts equal content into a duplicates folder.
+  invoice_duplicate=$(db_find_sha "$sha" "$file_size" "$source_path" invoice)
+  if [ -n "$invoice_duplicate" ]; then
+    if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$invoice_duplicate" invoice; then
+      case "$route_file_lower" in
+        *.pdf) quarantine_matching_invoice_xml "$source_path" "$invoice_duplicate" ;;
+      esac
+      return 0
+    fi
+  fi
   dup_record=$(db_find_sha "$sha" "$file_size" "$source_path")
   if [ -n "$dup_record" ]; then
     if quarantine_accounting_duplicate "$source_path" "$file_mtime" "$file_size" "$sha" "$dup_record"; then
@@ -2887,9 +2923,11 @@ main() {
 
   if [ "$RESCAN_UNC_MODE" -ne 1 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
-      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR"
+      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" \
+        --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$DOCS_ROOT" --intake "$DOWNLOADS_ROOT"
     else
-      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" --apply
+      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" --apply \
+        --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$DOCS_ROOT" --intake "$DOWNLOADS_ROOT"
     fi
   fi
 

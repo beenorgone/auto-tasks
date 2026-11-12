@@ -15,3 +15,6 @@ output/playwright/
 ivar-documents-organizer/unc.db
 ivar-documents-organizer/unc.db-wal
 ivar-documents-organizer/unc.db-shm
+ivar-documents-organizer/purchase-telegram.json
+ivar-documents-organizer/purchase-telegram-state.json
+ivar-documents-organizer/purchase-months.jsonl

@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -106,6 +107,80 @@ class PurchaseTests(unittest.TestCase):
         alias = self.root.parent/'alias'
         alias.symlink_to(self.root, target_is_directory=True)
         self.assertEqual([], purchase.cards(alias))
+
+    def test_intake_history_preview_apply_integrity_and_audit(self):
+        self.file('2026/trong nuoc/03/ho so PO10 - 2026-03-01 - NCC Known.zip')
+        inbox = self.root.parent / 'inbox'
+        inbox.mkdir()
+        source = inbox / 'ho so PO20 - 2025-09-26 - NCC Known.zip'
+        source.write_bytes(b'whole zip stays intact')
+        before = source.stat()
+        digest = purchase.sha256(source)
+        with contextlib.redirect_stdout(io.StringIO()):
+            purchase.route(self.root, self.state, intakes=[inbox])
+        self.assertTrue(source.exists())
+        self.assertFalse(self.state.exists())
+        self.assertFalse((self.root/'2025').exists())
+        with contextlib.redirect_stdout(io.StringIO()):
+            purchase.route(self.root, self.state, True, [inbox])
+        target = self.root/'2025/trong nuoc/09'/source.name
+        self.assertFalse(source.exists())
+        self.assertEqual(digest, purchase.sha256(target))
+        self.assertEqual(before.st_mtime_ns, target.stat().st_mtime_ns)
+        records = [json.loads(line) for line in (self.state/'purchase-months.jsonl').read_text().splitlines()]
+        self.assertEqual(['planned', 'completed'], [r['status'] for r in records])
+        self.assertEqual(digest, records[-1]['sha256'])
+        self.assertEqual(1, len(records[-1]['evidence']))
+
+    def test_intake_unknown_conflicting_invalid_collision_and_exact_supplier(self):
+        self.file('2026/trong nuoc/03/ho so PO1 - 2026-03-01 - NCC Mixed.zip')
+        self.file('2026/nhap khau/03/ho so PO2 - 2026-03-01 - NCC Mixed.zip')
+        self.file('2026/trong nuoc/03/ho so PO3 - 2026-03-01 - NCC Known.zip')
+        self.file('2025/03/ho so PO4 - 2025-03-01 - NCC Ungrouped.zip')
+        inbox = self.root.parent/'inbox'; inbox.mkdir()
+        names = ['ho so PO10 - 2026-09-01 - NCC Mixed.zip',
+                 'ho so PO11 - 2026-09-01 - NCC Unknown.zip',
+                 'ho so PO12 - 2026-09-01 - NCC Known-extra.zip',
+                 'ho so PO13 - 2026-02-30 - NCC Known.zip',
+                 'ho so PO14 - 2026-09-01 - NCC Ungrouped.zip',
+                 'ho so PO15 - 2026-09-01 - NCC Known.zip']
+        for name in names: (inbox/name).write_text('source')
+        self.file('2026/trong nuoc/09/'+names[-1], 'existing destination')
+        entries = list(purchase.intake_candidates(self.root, [inbox, inbox]))
+        self.assertEqual(6, len(entries))
+        self.assertTrue(all(c['stage'] == 'needs_review' for c in entries))
+        with contextlib.redirect_stdout(io.StringIO()):
+            purchase.route(self.root, self.state, True, [inbox])
+        self.assertTrue(all((inbox/name).read_text() == 'source' for name in names))
+
+    def test_intake_nested_inbox_and_symlinks(self):
+        self.file('2026/trong nuoc/03/ho so PO1 - 2026-03-01 - NCC Known.zip')
+        inbox = self.root.parent/'00_INBOX'; (inbox/'nested').mkdir(parents=True)
+        source = inbox/'nested/ho so PO2 - 2026-09-01 - NCC Known.zip'
+        source.write_text('original')
+        (inbox/'ho so PO3 - 2026-09-01 - NCC Known.zip').symlink_to(source)
+        (inbox/'linked').symlink_to(inbox/'nested', target_is_directory=True)
+        self.assertEqual([source], [c['source'] for c in purchase.intake_candidates(self.root, [inbox])])
+
+    def test_shell_intake_routes_known_supplier_and_holds_unknown(self):
+        self.file('2026/trong nuoc/03/ho so PO1 - 2026-03-01 - NCC Known.zip')
+        archive = self.root.parent/'ho so mua vao'; self.root.rename(archive)
+        intake = self.root.parent/'Documents/WIP & Reference'; intake.mkdir(parents=True)
+        name = 'ho so PO2 - 2026-09-01 - NCC Known.zip'
+        unknown = intake/'ho so PO3 - 2026-09-01 - NCC Unknown.zip'
+        (intake/name).write_bytes(b'archive'); unknown.write_bytes(b'archive')
+        env = {**os.environ, 'HOME': self.temp.name, 'IVAR_DATA': str(self.root.parent),
+               'STATE_DIR': str(self.state), 'DOCSYNC_ROOT': str(intake)}
+        script = Path(__file__).parent/'ivar-documents-organizer.sh'
+        for flag in ('--plan-managed-rules', '--apply-managed-rules'):
+            result = subprocess.run(['sh', str(script), flag, '--no-sync'], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(0, result.returncode, result.stdout+result.stderr)
+            self.assertIn('purchase_months:', result.stdout)
+            if flag == '--plan-managed-rules': self.assertTrue((intake/name).exists())
+        self.assertFalse((intake/name).exists())
+        self.assertEqual(b'archive', (archive/'2026/trong nuoc/09'/name).read_bytes())
+        self.assertTrue(unknown.exists())
 
 if __name__ == '__main__':
     unittest.main()

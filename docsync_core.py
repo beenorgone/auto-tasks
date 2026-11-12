@@ -21,6 +21,9 @@ STAGES = ('needs_review', 'in_progress', 'waiting_external', 'ready', 'filed', '
 LABELS = {'needs_review': 'Chờ duyệt', 'in_progress': 'Đang xử lý', 'waiting_external': 'Chờ bên ngoài', 'ready': 'Sẵn sàng chuyển', 'filed': 'Đã lưu hồ sơ', 'archived': 'Lưu trữ'}
 
 def board(year_root: Path) -> dict:
+    purchase_cards = (PURCHASE.cards(PURCHASE.purchase_root(), PURCHASE.intake_paths())
+                      if year_root.resolve() == work_root().resolve() else [])
+    purchase_paths = {card['path'] for card in purchase_cards}
     rule_file = WIP.rules_path(year_root)
     rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
     records = {}
@@ -34,6 +37,8 @@ def board(year_root: Path) -> dict:
     root_paths = {p.name: p for p in year_root.iterdir() if p.is_file() and not p.name.startswith('.') and not p.is_symlink()}
     for relative in sorted(set(records) | set(root_paths)):
         path = year_root / relative
+        if str(path) in purchase_paths:
+            continue
         if not path.resolve().is_relative_to(year_root.resolve()):
             continue
         if not path.is_file() or path.is_symlink():
@@ -59,8 +64,7 @@ def board(year_root: Path) -> dict:
             next_action = 'Đã duyệt phân loại; chuyển thủ công theo đích đề xuất'
         cards.append(dict(path=relative, category=category, stage=stage, reason=reason, target=target, mode=mode,
                           dossier=old['dossier_id'] if unchanged else None, next=next_action))
-    if year_root.resolve() == work_root().resolve():
-        cards.extend(PURCHASE.cards(PURCHASE.purchase_root()))
+    cards.extend(purchase_cards)
     return {'cards': cards, 'counts': {stage: sum(c['stage'] == stage for c in cards) for stage in STAGES}}
 
 def health(year_root: Path) -> dict:

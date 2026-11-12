@@ -53,7 +53,7 @@ class AccountingDuplicateTests(unittest.TestCase):
     def process(self, source, dry_run=False):
         self.run_handler('process_source_file', source, self.home, dry_run=dry_run)
 
-    def test_accounting_types_go_to_year_duplicates(self):
+    def test_vat_duplicates_stay_at_source_and_unc_is_quarantined(self):
         for status in ('unc', 'invoice', 'invoice-xml'):
             with self.subTest(status=status):
                 payload = status.encode()
@@ -63,7 +63,8 @@ class AccountingDuplicateTests(unittest.TestCase):
                 self.seed(target, payload, status)
                 self.process(source)
                 self.assertFalse(source.exists())
-                self.assertEqual(payload, (self.duplicates / source.name).read_bytes())
+                expected = self.duplicates / source.name if status == "unc" else source.with_name(source.stem + "_duplicate" + source.suffix)
+                self.assertEqual(payload, expected.read_bytes())
                 self.assertEqual(payload, target.read_bytes())
         self.assertFalse((self.year / '10/duplicates').exists())
         self.assertFalse((self.year / '2026/2026-10/duplicates').exists())
@@ -104,7 +105,7 @@ class AccountingDuplicateTests(unittest.TestCase):
         self.seed(self.archive / 'old-duplicate.txt', source.read_bytes(), 'duplicate')
         self.process(source)
         self.assertFalse(source.exists())
-        self.assertEqual(target.read_bytes(), (self.duplicates / source.name).read_bytes())
+        self.assertEqual(target.read_bytes(), source.with_name(source.stem + "_duplicate" + source.suffix).read_bytes())
 
     def test_generic_monthly_and_duplicate_records_are_ignored(self):
         for status in ('bucketed', 'year-inbox', 'managed-route', 'duplicate'):
@@ -133,7 +134,7 @@ class AccountingDuplicateTests(unittest.TestCase):
         sha = hashlib.sha256(payload).hexdigest()
         target = self.archive / 'invoice.txt'
         target.write_bytes(payload)
-        self.seed(target, payload)
+        self.seed(target, payload, "unc")
         self.duplicates.mkdir()
         (self.duplicates / source.name).write_bytes(b'first copy')
         (self.duplicates / f'download_{sha}.txt').write_bytes(b'second copy')
@@ -141,6 +142,22 @@ class AccountingDuplicateTests(unittest.TestCase):
         self.assertEqual(b'first copy', (self.duplicates / source.name).read_bytes())
         self.assertEqual(b'second copy', (self.duplicates / f'download_{sha}.txt').read_bytes())
         self.assertEqual(payload, (self.duplicates / f'download_{sha}_1.txt').read_bytes())
+
+    def test_invoice_rename_collision_and_repeat_scan(self):
+        source = self.intake('download.pdf')
+        payload = source.read_bytes()
+        target = self.archive / 'invoice.pdf'
+        target.write_bytes(payload)
+        self.seed(target, payload)
+        marked = source.with_name('download_duplicate.pdf')
+        marked.write_bytes(b'keep existing')
+        self.process(source)
+        renamed = source.with_name('download_duplicate_1.pdf')
+        self.assertEqual(payload, renamed.read_bytes())
+        self.process(renamed)
+        self.assertEqual(payload, renamed.read_bytes())
+        self.assertEqual(b'keep existing', marked.read_bytes())
+        self.assertFalse(self.duplicates.exists())
 
     def test_preview_finds_duplicate_without_moving_or_changing_db(self):
         source = self.intake()
@@ -181,8 +198,8 @@ class AccountingDuplicateTests(unittest.TestCase):
                          hashlib.sha256(source.read_bytes()).hexdigest())
         self.assertFalse(source.exists())
         self.assertFalse(sidecar.exists())
-        self.assertEqual(target.read_bytes(), (self.duplicates / source.name).read_bytes())
-        self.assertEqual(b'invoice XML', (self.duplicates / sidecar.name).read_bytes())
+        self.assertEqual(target.read_bytes(), source.with_name(source.stem + "_duplicate" + source.suffix).read_bytes())
+        self.assertEqual(b'invoice XML', sidecar.with_name("download_duplicate.xml").read_bytes())
 
     def test_database_pdf_duplicate_also_handles_xml_seen_before_pdf(self):
         source = self.intake('download.pdf')
@@ -198,7 +215,7 @@ class AccountingDuplicateTests(unittest.TestCase):
         self.process(source)
         self.assertFalse(source.exists())
         self.assertFalse(sidecar.exists())
-        self.assertEqual(xml_target.read_bytes(), (self.duplicates / sidecar.name).read_bytes())
+        self.assertEqual(xml_target.read_bytes(), sidecar.with_name("download_duplicate.xml").read_bytes())
 
     def test_invoice_xml_same_name_with_different_size_stays_in_archive(self):
         source = self.intake('download.xml', b'new XML with more content')

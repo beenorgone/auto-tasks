@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """DocSync command-line Kanban and shared organizer entry point."""
 import docsync_purchase as PURCHASE
+import docsync_erp as ERP
+import datetime as dt
 import argparse
 import json
 import subprocess
@@ -33,9 +35,38 @@ def main(argv=None):
     state = sub.add_parser('set-status')
     state.add_argument('dossier')
     state.add_argument('status', choices=WIP.VALID_STATUSES)
+    today = sub.add_parser('today', help='bảng tổng hợp file trong ngày theo nhóm + trạng thái ERP')
+    today.add_argument('--date', type=dt.date.fromisoformat, help='YYYY-MM-DD (mặc định hôm nay)')
+    today.add_argument('--json', action='store_true')
+    erp = sub.add_parser('erp', help='kết nối ERP IVAR: tra bản ghi, gán file, đẩy file')
+    erp_sub = erp.add_subparsers(dest='erp_command', required=True)
+    erp_sub.add_parser('check', help='kiểm tra kết nối + App Password')
+    find = erp_sub.add_parser('find', help='tìm bản ghi được sửa')
+    find.add_argument('type', choices=sorted(ERP.TYPES))
+    find.add_argument('query', nargs='?', default='')
+    fields = erp_sub.add_parser('fields', help='field file của một bản ghi')
+    fields.add_argument('type', choices=sorted(ERP.TYPES))
+    fields.add_argument('id', type=int)
+    assign = erp_sub.add_parser('assign', help='gán file (đường dẫn trong gốc làm việc) vào bản ghi + field')
+    assign.add_argument('path')
+    assign.add_argument('type', choices=sorted(ERP.TYPES))
+    assign.add_argument('id', type=int)
+    assign.add_argument('field')
+    assign.add_argument('--ai', choices=('none', 'summary', 'analysis'), default='none', help='AI tạo Ghi chú AI sau khi tải')
+    assign.add_argument('--instruction', default='', help='yêu cầu riêng cho AI')
+    assign.add_argument('--no-verify', action='store_true', help='không hỏi ERP để kiểm field (offline)')
+    unassign = erp_sub.add_parser('unassign')
+    unassign.add_argument('path')
+    push = erp_sub.add_parser('push', help='đẩy các file đã gán (mặc định: mọi file chờ / lỗi)')
+    push.add_argument('paths', nargs='*')
+    push.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     root = args.year_root.resolve()
     command = args.command or 'board'
+    if command == 'today':
+        return print_today(root, args.date, args.json)
+    if command == 'erp':
+        return run_erp(root, args)
     if command in ('preview', 'apply'):
         if root != work_root().resolve():
             parser.error('preview/apply only support the configured WIP & Reference root')
@@ -99,9 +130,87 @@ def main(argv=None):
                     print(f'  … {len(cards)-len(shown)} more; docsync board --stage {stage} --limit 0')
     return 0
 
+def classifier(root):
+    rule_file = WIP.rules_path(root)
+    rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
+    return lambda relative, path: WIP.classify(relative, rules, path)
+
+
+def clean(value):
+    """Escape terminal control characters in untrusted file names / ERP text."""
+    text = str(value)
+    return text.encode('unicode_escape').decode() if any(ord(c) < 32 or ord(c) == 127 for c in text) else text
+
+
+ERP_LABELS = {'unassigned': 'chưa gán', 'assigned': 'chờ đẩy', 'stale': 'file đã đổi — gán lại',
+              'pushed': 'đã lên ERP', 'duplicate': 'ERP đã có', 'error': 'lỗi'}
+
+
+def print_today(root, day, as_json):
+    data = ERP.today(root, day, classifier(root))
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    print(f"DocSync hôm nay {data['date']} · {data['total']} file · " +
+          ' · '.join(f"{ERP_LABELS[k]}: {v}" for k, v in data['counts'].items() if v))
+    for group in data['groups']:
+        print(f"\n[{group['category']}] ({len(group['files'])})")
+        for row in group['files']:
+            line = f"  • {clean(row['path'])}  [{ERP_LABELS.get(row['erp'], row['erp'])}]"
+            a = row['assignment']
+            if a:
+                line += f"  → {a['type']} #{a['id']} › {a['field']}" + (f" + AI {a['ai_mode']}" if a['ai'] else '')
+            elif row['suggestion']:
+                sg = row['suggestion']
+                line += f"  gợi ý: {sg['type']} › {sg['field']}" + (f" (tìm '{sg['query']}')" if sg['query'] else '')
+            print(line)
+    if data['truncated']:
+        print(f'\n… dừng ở {ERP.TODAY_LIMIT} file')
+    print('\nNext: docsync erp find <type> <từ khóa> → docsync erp assign <file> <type> <id> <field> [--ai summary] → docsync erp push')
+    return 0
+
+
+def run_erp(root, args):
+    command = args.erp_command
+    if command == 'unassign':
+        print('Đã bỏ gán.' if ERP.unassign(args.path) else 'File chưa được gán.')
+        return 0
+    client = None
+    if command != 'assign' or not args.no_verify:
+        client = ERP.ErpClient(ERP.load_config())
+    if command == 'check':
+        types = client.types().get('types', [])
+        print('Kết nối ERP OK · ' + ', '.join(t['type'] for t in types))
+    elif command == 'find':
+        for row in client.targets(args.type, args.query):
+            print(f"{row['id']:>7}  {clean(row['label'])}  {clean(row.get('status', ''))} {clean(row.get('date', ''))} {clean(row.get('extra', ''))}")
+    elif command == 'fields':
+        data = client.record(args.type, args.id)
+        print(clean(data['record']['label']) + ' · ' + clean(data['record']['url']))
+        for field in data['fields']:
+            limit = f"/{field['max']}" if field['max'] else ''
+            print(f"  {field['key']}: {clean(field['label'])} ({field['count']}{limit} file)")
+    elif command == 'assign':
+        label = field_label = ''
+        if client:
+            data = client.record(args.type, args.id)
+            known = {f['key']: f for f in data['fields']}
+            if args.field not in known:
+                raise ERP.ErpError('Bản ghi không có field này. Chọn: ' + ', '.join(known))
+            label, field_label = data['record']['label'], known[args.field]['label']
+        record = ERP.assign(root, args.path, args.type, args.id, args.field, label=label, field_label=field_label,
+                            ai=args.ai != 'none', ai_mode=args.ai, instruction=args.instruction)
+        print(f"Đã gán {clean(args.path)} → {record['type']} #{record['id']} › {record['field']} · SHA-256 {record['sha256'][:12]}…")
+        print('Next: docsync erp push --dry-run → docsync erp push')
+    elif command == 'push':
+        for result in ERP.push(root, client, args.paths or None, args.dry_run):
+            print(f"  {result['status']:<10} {clean(result['path'])} — {clean(result['message'])}")
+    return 0
+
+
 if __name__ == '__main__':
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, WIP.sqlite3.Error) as error:
+    except (OSError, ValueError, WIP.sqlite3.Error, ERP.ErpError) as error:
         print(f'DocSync error: {error}', file=sys.stderr)
         raise SystemExit(1)

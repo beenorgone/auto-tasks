@@ -333,3 +333,45 @@ Nếu đặt `IVAR_DATA`, rule dùng thư mục `ho so mua vao` bên trong đư�
 - Máy local phải đang chạy và có mạng để nhận quyết định. Bot xác nhận **đã ghi nhận** trước; sau khi chuyển và kiểm tra hash, bot mới báo **đã chuyển**. Không bật đồng bộ Drive.
 
 Hướng dẫn kỹ thuật: [triển khai, setup, logic, nghiệm thu và rollback](docs/DOCSYNC-DEPLOYMENT.md).
+
+## ERP — đẩy file trong ngày lên ERP IVAR
+
+Bảng **Hôm nay → ERP IVAR** (web <http://127.0.0.1:8787>, hoặc `docsync today`) gom các file mới tải / sửa / được
+organizer chuyển trong ngày (mtime hoặc ctime = ngày chọn) theo nhóm phân loại DocSync, kèm gợi ý loại bản ghi + field
+(VD hoá đơn `PO123` → Đơn mua › Hoá đơn, tìm "PO123"). **Không file nào tự đẩy**: người dùng chọn bản ghi, field,
+AI (không / tóm tắt / phân tích → Ghi chú AI trên bản ghi) rồi tick và đẩy.
+
+### Cài một lần
+
+1. ERP → Cài đặt ERP → Integrations → **AI App Passwords**: thêm user, user tạo Application Password ở hồ sơ WP,
+   admin duyệt phạm vi **DocSync máy tính (đẩy file)** — hoặc **ERP Records MCP + DocSync** nếu cùng credential còn
+   dùng cho agent MCP tra bản ghi. Phạm vi cũ (`erp_full`, `erp_all`) KHÔNG tự có quyền đẩy file.
+2. Lưu mật khẩu: `mkdir -p ~/.config/docsync && nano ~/.config/docsync/erp-app-password && chmod 600 ~/.config/docsync/erp-app-password`
+   (hoặc biến môi trường `DOCSYNC_ERP_APP_PASSWORD`).
+3. Tạo `ivar-documents-organizer/erp.json` (không commit):
+
+```json
+{"base_url": "https://ivarvietnam.com", "username": "<tên đăng nhập WP>", "password_file": "~/.config/docsync/erp-app-password"}
+```
+
+4. Kiểm tra: `docsync erp check`.
+
+### CLI
+
+```bash
+docsync today                                    # bảng tổng hợp hôm nay (--date YYYY-MM-DD, --json)
+docsync erp find po PO123                         # bản ghi BẠN ĐƯỢC SỬA (po ir qc_test tcb seller bom qtbm pth mo so)
+docsync erp fields po 4567                        # field file thật của bản ghi
+docsync erp assign "00_INBOX/Hoa don PO123.pdf" po 4567 invoices --ai analysis --instruction "So với PO"
+docsync erp push --dry-run && docsync erp push    # đẩy file chờ / lỗi; hoặc liệt kê đường dẫn cụ thể
+docsync erp unassign "00_INBOX/Hoa don PO123.pdf"
+```
+
+### Bảo vệ
+
+- Gán buộc với SHA-256 của file: sửa file sau khi gán → trạng thái "file đã đổi — gán lại", không đẩy.
+- ERP tính lại SHA-256 trên file nhận được; file cùng hash đã có trong field → trả "ERP đã có", không gắn lần hai.
+- Chỉ file thường trong gốc làm việc (không symlink, không file ẩn, ≤ 40 MB). ERP kiểm quyền sửa bản ghi theo
+  user của App Password ở mọi lượt; chỉ THÊM file vào field, không gỡ / thay / sửa dữ liệu nghiệp vụ.
+- AI đi qua gateway ERP (hạn mức 30 lượt/giờ/người, ghi `ivar_ai_runs`); kết quả là Ghi chú AI ở tab ✨ AI của bản ghi.
+- Chỉ mục gán: `ivar-documents-organizer/erp-assignments.json` (không chứa mật khẩu).

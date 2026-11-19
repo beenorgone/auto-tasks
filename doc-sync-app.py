@@ -18,9 +18,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from docsync_core import board, health
+from docsync_core import board, health, WIP
 from docsync_paths import work_root
+import docsync_erp as ERP
 import sqlite3
+import urllib.parse
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -30,6 +32,8 @@ DOCUMENTS_ROOT = Path.home() / "Documents"
 LOCAL_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 MAX_LOG_LINES = 400
+MAX_ERP_BODY = 64 * 1024
+MAX_PUSH_PATHS = 20
 
 
 class RunState:
@@ -161,7 +165,123 @@ class RunState:
 APP_STATE = RunState()
 
 
+ERP_STYLE = """<style>
+.erp-today{margin-top:24px;align-items:stretch!important}.erp-today .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.erp-today input[type=date],.erp-today input[type=search],.erp-today select,.erp-today textarea{font:14px Roboto,Arial;padding:8px 10px;border:1px solid var(--outline);border-radius:10px;background:#fff;color:var(--text);margin:0}
+.erp-today table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
+.erp-today th,.erp-today td{padding:8px 10px;border-bottom:1px solid #e6e0e9;text-align:left;vertical-align:top;font-size:13px}
+.erp-today th{background:#efe9f4;font-weight:600}.erp-today tr.group td{background:#f7f2fa;font-weight:700;color:#4a4458}
+.erp-today .path{overflow-wrap:anywhere;max-width:420px}.erp-today .muted{color:var(--muted);font-size:12px}
+.erp-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#e8def8;color:#21005d}
+.erp-badge.pushed,.erp-badge.duplicate{background:#d8f6dd;color:var(--good)}.erp-badge.error,.erp-badge.stale{background:#ffdad4;color:var(--bad)}
+.erp-badge.assigned{background:#fff4e7;color:#5d3a00}.erp-editor{display:grid;gap:8px;padding:12px;background:#f7f2fa;border-radius:12px;margin-top:8px}
+.erp-editor .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.erp-editor label{margin:0;align-items:center}
+.erp-today button.small{padding:6px 12px;font-size:12px}.erp-scroll{overflow:auto}
+@media(max-width:760px){.erp-today td.path{max-width:60vw}}
+</style>"""
+
+ERP_HTML = """<section class='panel erp-today' aria-labelledby='erp-today-title'>
+<h2 id='erp-today-title'>Hôm nay → ERP IVAR</h2>
+<p>Tổng hợp file mới tải / sửa / được sắp xếp trong ngày theo nhóm. Chọn bản ghi + field cho từng file, tùy chọn AI tóm tắt / phân tích thành Ghi chú AI, rồi tick và đẩy lên ERP. Không có file nào tự đẩy.</p>
+<div class='toolbar'><input id='erp-date' type='date' aria-label='Ngày'><button id='erp-refresh' class='tonal'>Tải bảng ngày</button>
+<label><input id='erp-only-open' type='checkbox' checked>Ẩn file đã lên ERP</label>
+<button id='erp-push' class='secondary' disabled>Đẩy file đã chọn lên ERP</button><span id='erp-summary' class='muted'></span></div>
+<div id='erp-status' class='status' hidden></div>
+<div class='erp-scroll'><table><thead><tr><th><input id='erp-all' type='checkbox' aria-label='Chọn tất cả file đã gán'></th><th>File</th><th>ERP</th><th></th></tr></thead><tbody id='erp-rows'><tr><td colspan='4' class='muted'>Bấm “Tải bảng ngày”.</td></tr></tbody></table></div>
+</section>"""
+
+ERP_SCRIPT = r"""<script>
+(()=>{
+const $=s=>document.querySelector(s), rows=$('#erp-rows'), statusBox=$('#erp-status'), pushBtn=$('#erp-push');
+const TYPES={po:'Đơn mua (PO)',ir:'Phiếu nhập kho',qc_test:'Kiểm nghiệm (QC)',tcb:'Tự công bố (TCB)',seller:'Nhà cung cấp',bom:'Định mức (BoM)',qtbm:'Quy trình / biểu mẫu',pth:'Phiếu thu hồi',mo:'Lệnh sản xuất (MO)',so:'Đơn bán (SO)'};
+const LABELS={unassigned:'Chưa gán',assigned:'Chờ đẩy',stale:'File đã đổi — gán lại',pushed:'Đã lên ERP',duplicate:'ERP đã có',error:'Lỗi'};
+let data=null;
+const el=(tag,props={},...kids)=>{const n=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k==='class')n.className=v;else if(k in n)n[k]=v;else n.setAttribute(k,v);}for(const c of kids)if(c!=null)n.append(c);return n;};
+function say(text,kind){statusBox.hidden=!text;statusBox.textContent=text||'';statusBox.className='status '+(kind||'');}
+async function api(path,body){
+  const opts=body?{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify(body)}:{cache:'no-store'};
+  const res=await fetch(path,opts);let json={};try{json=await res.json();}catch(e){}
+  if(!res.ok)throw new Error(json.message||('HTTP '+res.status));return json;
+}
+function selected(){return [...rows.querySelectorAll('input[data-push]:checked')].map(i=>i.dataset.push);}
+function syncPush(){const n=selected().length;pushBtn.disabled=!n;pushBtn.textContent=n?`Đẩy ${n} file lên ERP`:'Đẩy file đã chọn lên ERP';}
+function render(){
+  rows.replaceChildren();if(!data)return;
+  const hide=$('#erp-only-open').checked;let shown=0;
+  $('#erp-summary').textContent=`${data.total} file · `+Object.entries(data.counts).filter(([,v])=>v).map(([k,v])=>`${LABELS[k]}: ${v}`).join(' · ');
+  for(const group of data.groups){
+    const files=group.files.filter(f=>!hide||!['pushed','duplicate'].includes(f.erp));if(!files.length)continue;
+    rows.append(el('tr',{class:'group'},el('td',{colSpan:4,textContent:`${group.category} (${files.length})`})));
+    for(const f of files){shown++;rows.append(row(f));}
+  }
+  if(!shown)rows.append(el('tr',{},el('td',{colSpan:4,class:'muted',textContent:'Không có file nào cần xử lý trong ngày này.'})));
+  syncPush();
+}
+function row(f){
+  const a=f.assignment, canPush=a&&['assigned','error'].includes(f.erp);
+  const box=el('input',{type:'checkbox',disabled:!canPush,title:canPush?'Chọn để đẩy':'Gán bản ghi trước'});if(canPush){box.dataset.push=f.path;box.onchange=syncPush;}
+  const info=el('td',{class:'path'},el('strong',{textContent:f.name}),el('div',{class:'muted',textContent:`${f.path} · ${Math.ceil(f.size/1024)} KB · ${f.modified.replace('T',' ')}`}),el('div',{class:'muted',textContent:f.reason}));
+  if(f.too_large)info.append(el('div',{class:'muted',textContent:'Quá 40 MB — không đẩy được.'}));
+  const erp=el('td',{},el('span',{class:'erp-badge '+f.erp,textContent:LABELS[f.erp]||f.erp}));
+  if(a){erp.append(el('div',{class:'muted',textContent:`${TYPES[a.type]||a.type} · ${a.label||('#'+a.id)} › ${a.field_label||a.field}${a.ai?' · AI '+(a.ai_mode==='analysis'?'phân tích':'tóm tắt'):''}`}));
+    if(a.message)erp.append(el('div',{class:'muted',textContent:a.message}));
+    if(a.record_url)erp.append(el('a',{href:a.record_url,target:'_blank',rel:'noopener noreferrer',textContent:'Mở bản ghi'}));}
+  else if(f.suggestion)erp.append(el('div',{class:'muted',textContent:`Gợi ý: ${f.suggestion.label}${f.suggestion.query?' · tìm “'+f.suggestion.query+'”':''}`}));
+  const act=el('td',{});const tr=el('tr',{},el('td',{},box),info,erp,act);
+  if(!f.too_large){const btn=el('button',{class:'small tonal',textContent:a?'Sửa gán':'Gán bản ghi'});btn.onclick=()=>openEditor(f,info,btn);act.append(btn);}
+  if(a){const rm=el('button',{class:'small secondary',textContent:'Bỏ gán'});rm.onclick=async()=>{try{await api('/api/erp/unassign',{path:f.path});await load();}catch(e){say(e.message,'bad');}};act.append(rm);}
+  return tr;
+}
+function openEditor(f,cell,btn){
+  if(cell.querySelector('.erp-editor')){cell.querySelector('.erp-editor').remove();return;}
+  const a=f.assignment||{}, s=f.suggestion||{};
+  const type=el('select',{'aria-label':'Loại bản ghi'});for(const[k,v]of Object.entries(TYPES))type.append(el('option',{value:k,textContent:v}));type.value=a.type||s.type||'po';
+  const q=el('input',{type:'search',placeholder:'Mã / tên / ID bản ghi',value:a.id?String(a.id):(s.query||'')});
+  const find=el('button',{class:'small',textContent:'Tìm'});const pick=el('select',{'aria-label':'Bản ghi'},el('option',{value:'',textContent:'— chọn bản ghi —'}));
+  const field=el('select',{'aria-label':'Field file'},el('option',{value:'',textContent:'— chọn field —'}));
+  const ai=el('select',{'aria-label':'AI'},el('option',{value:'none',textContent:'Không dùng AI'}),el('option',{value:'summary',textContent:'AI tóm tắt → Ghi chú AI'}),el('option',{value:'analysis',textContent:'AI phân tích → Ghi chú AI'}));ai.value=a.ai?(a.ai_mode||'summary'):'none';
+  const ins=el('textarea',{rows:2,maxLength:2000,placeholder:'Yêu cầu riêng cho AI (tuỳ chọn)',value:a.instruction||''});
+  const save=el('button',{class:'small',textContent:'Lưu gán',disabled:true});const note=el('span',{class:'muted'});
+  const ed=el('div',{class:'erp-editor'},el('div',{class:'row'},type,q,find),el('div',{class:'row'},pick),el('div',{class:'row'},field,ai),ins,el('div',{class:'row'},save,note));
+  cell.append(ed);
+  let labels={};
+  async function search(){note.textContent='Đang tìm…';pick.length=1;field.length=1;save.disabled=true;
+    try{const r=await api('/api/erp/targets?'+new URLSearchParams({type:type.value,q:q.value}));
+      for(const x of r.records){pick.append(el('option',{value:String(x.id),textContent:`#${x.id} · ${x.label}${x.extra?' · '+x.extra:''}${x.date?' · '+x.date:''}`}));labels[x.id]=x.label;}
+      note.textContent=r.records.length?`${r.records.length} bản ghi bạn được sửa`:'Không thấy bản ghi (hoặc không có quyền sửa).';
+      if(a.id&&type.value===a.type){pick.value=String(a.id);if(pick.value)await fields();}else if(r.records.length===1){pick.value=String(r.records[0].id);await fields();}
+    }catch(e){note.textContent=e.message;}}
+  async function fields(){field.length=1;save.disabled=true;if(!pick.value)return;note.textContent='Đang đọc field…';
+    try{const r=await api('/api/erp/record?'+new URLSearchParams({type:type.value,id:pick.value}));
+      for(const x of r.fields)field.append(el('option',{value:x.key,textContent:`${x.label} (${x.count}${x.max?'/'+x.max:''})`}));
+      const want=a.field&&type.value===a.type?a.field:(s.type===type.value?s.field:'');if(want&&r.fields.some(x=>x.key===want))field.value=want;
+      note.textContent=r.ai_available?'':'AI tài liệu đang tắt trên ERP.';save.disabled=!field.value;
+    }catch(e){note.textContent=e.message;}}
+  find.onclick=search;q.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search();}};type.onchange=search;pick.onchange=fields;field.onchange=()=>{save.disabled=!field.value;};
+  save.onclick=async()=>{save.disabled=true;note.textContent='Đang lưu…';
+    try{await api('/api/erp/assign',{path:f.path,type:type.value,id:Number(pick.value),field:field.value,label:labels[pick.value]||'',field_label:field.selectedOptions[0].textContent.replace(/ \(.*\)$/,''),ai:ai.value!=='none',ai_mode:ai.value==='analysis'?'analysis':'summary',instruction:ins.value});
+      await load(true);say('Đã gán. Tick file rồi bấm đẩy lên ERP.','good');}catch(e){note.textContent=e.message;save.disabled=false;}};
+  search();
+}
+async function load(keep){if(!keep)say('');try{data=await api('/api/today?'+new URLSearchParams({date:$('#erp-date').value}));render();}catch(e){say(e.message,'bad');}}
+$('#erp-date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+$('#erp-refresh').onclick=()=>load();$('#erp-only-open').onchange=render;
+$('#erp-all').onchange=e=>{rows.querySelectorAll('input[data-push]').forEach(i=>{i.checked=e.target.checked;});syncPush();};
+pushBtn.onclick=async()=>{const paths=selected();if(!paths.length)return;if(!confirm(`Đẩy ${paths.length} file lên ERP? File sẽ được gắn vào bản ghi đã chọn.`))return;
+  pushBtn.disabled=true;say(`Đang đẩy ${paths.length} file…`);
+  try{const r=await api('/api/erp/push',{paths});const bad=r.results.filter(x=>x.status==='error');
+    say(bad.length?`${r.results.length-bad.length} xong, ${bad.length} lỗi: `+bad.map(x=>x.path+' — '+x.message).join(' | '):`Đã xử lý ${r.results.length} file.`,bad.length?'bad':'good');}
+  catch(e){say(e.message,'bad');}await load(true);};
+load();
+})();
+</script>"""
+
+
 def page(token: str) -> str:
+    return _base_page(token).replace("</main>", ERP_HTML + "</main>", 1).replace("</head>", ERP_STYLE + "</head>", 1).replace("</body>", ERP_SCRIPT + "</body>", 1)
+
+
+def _base_page(token: str) -> str:
     safe_token = json.dumps(token)
     return f"""<!doctype html>
 <html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -197,6 +317,55 @@ async function refreshOverview(){{
 refreshOverview();setInterval(refreshOverview,30000);
 preview.onclick=()=>run('preview');wipScan.onclick=()=>run('wip_scan');apply.onclick=()=>applyConfirm.classList.add('visible');confirmApply.onclick=()=>run('apply');cancelApply.onclick=()=>applyConfirm.classList.remove('visible');openKanban.onclick=event=>{{if(openKanban.getAttribute('aria-disabled')==='true') event.preventDefault();}};refresh();setInterval(refresh,1000);
 </script></body></html>"""
+
+
+def erp_classifier(year_root: Path):
+    rule_file = WIP.rules_path(year_root)
+    rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
+    return lambda relative, path: WIP.classify(relative, rules, path)
+
+
+def erp_get(path: str, query: dict, year_root: Path, client_factory=None) -> dict:
+    """Read-only ERP/today endpoints. Raises ERP.ErpError / ValueError with a user-facing message."""
+    one = lambda key: (query.get(key) or [''])[0]
+    if path == '/api/today':
+        day = dt.date.fromisoformat(one('date')) if one('date') else None
+        return ERP.today(year_root, day, erp_classifier(year_root))
+    client = (client_factory or (lambda: ERP.ErpClient(ERP.load_config())))()
+    kind = one('type')
+    if kind not in ERP.TYPES:
+        raise ValueError('Loại bản ghi không hợp lệ.')
+    if path == '/api/erp/targets':
+        return {'records': client.targets(kind, one('q')[:100])}
+    record_id = int(one('id') or 0)
+    if record_id <= 0:
+        raise ValueError('Thiếu ID bản ghi.')
+    return client.record(kind, record_id)
+
+
+def erp_post(path: str, payload: dict, year_root: Path, client_factory=None) -> dict:
+    if path == '/api/erp/unassign':
+        return {'removed': ERP.unassign(str(payload.get('path', '')))}
+    if path == '/api/erp/assign':
+        kind, record_id, field = str(payload.get('type', '')), int(payload.get('id') or 0), str(payload.get('field', ''))
+        client = (client_factory or (lambda: ERP.ErpClient(ERP.load_config())))()
+        # Re-read the record so a forged or stale field never reaches the assignment index.
+        record = client.record(kind, record_id)
+        fields = {item['key']: item for item in record.get('fields', [])}
+        if field not in fields:
+            raise ValueError('Bản ghi không có field này.')
+        saved = ERP.assign(year_root, str(payload.get('path', '')), kind, record_id, field,
+                           label=str(record.get('record', {}).get('label', '')), field_label=str(fields[field]['label']),
+                           ai=payload.get('ai') is True, ai_mode=str(payload.get('ai_mode', 'summary')),
+                           instruction=str(payload.get('instruction', ''))[:2000])
+        return {'assignment': ERP.public_assignment(saved)}
+    if path == '/api/erp/push':
+        paths = payload.get('paths')
+        if not isinstance(paths, list) or not paths or len(paths) > MAX_PUSH_PATHS or not all(isinstance(p, str) for p in paths):
+            raise ValueError(f'Chọn 1–{MAX_PUSH_PATHS} file.')
+        client = (client_factory or (lambda: ERP.ErpClient(ERP.load_config())))()
+        return {'results': ERP.push(year_root, client, paths)}
+    raise LookupError
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -260,16 +429,39 @@ class AppHandler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self.send_json(HTTPStatus.OK, APP_STATE.snapshot())
             return
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path in ("/api/today", "/api/erp/targets", "/api/erp/record"):
+            try:
+                data = erp_get(parsed.path, urllib.parse.parse_qs(parsed.query), APP_STATE.year_root)
+            except (ERP.ErpError, ValueError, OSError) as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+                return
+            self.send_json(HTTPStatus.OK, data)
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
 
     def do_POST(self) -> None:
         if not self.local_request():
             return
-        if self.path != "/api/run":
+        if self.path not in ("/api/run", "/api/erp/assign", "/api/erp/unassign", "/api/erp/push"):
             self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
             return
         if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), APP_STATE.csrf_token):
             self.send_json(HTTPStatus.FORBIDDEN, {"message": "Invalid local request token."})
+            return
+        if self.path != "/api/run":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 2 <= length <= MAX_ERP_BODY:
+                    raise ValueError("Yêu cầu không hợp lệ.")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Yêu cầu không hợp lệ.")
+                data = erp_post(self.path, payload, APP_STATE.year_root)
+            except (ERP.ErpError, ValueError, TypeError, OSError) as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+                return
+            self.send_json(HTTPStatus.OK, data)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))

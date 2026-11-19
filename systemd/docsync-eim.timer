@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for new GHTK reconciliation files every 2 minutes
+
+[Timer]
+OnStartupSec=90s
+OnUnitInactiveSec=120s
+
+[Install]
+WantedBy=timers.target

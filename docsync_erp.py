@@ -1,9 +1,12 @@
 """DocSync → IVAR ERP: daily file summary, explicit record/field assignments and push.
 
-Transport: HTTPS REST `/wp-json/ivar/v1/docsync/*` with a WordPress Application
-Password approved for the `erp_docsync` (or `erp_records_docsync`) scope in
-ERP → Cài đặt → AI App Passwords. Every call re-checks the ERP user's edit
-permission on the target record; this module never decides access itself.
+DocSync is just one client of the ERP's generic file-intake API (contract:
+ivarvietnam theme docs/api/file-intake.md). Transport: HTTPS REST
+`/wp-json/ivar/v1/intake/*` (+ eim `/wp-json/eim/v1/intake/*`) with the
+Application Password of the person using this machine, approved for the
+`erp_file_intake` (or `erp_records_intake`) scope in ERP → AI App Passwords.
+Every call runs with that person's ERP permissions; several employees each use
+their own credential on their own machine. This module never decides access.
 
 Nothing is pushed automatically: a person assigns each file to a record + field
 (CLI or the local web panel), then runs push. Assignments are bound to the file's
@@ -52,10 +55,15 @@ TYPES = {
     'mo': 'Lệnh sản xuất (MO)', 'so': 'Đơn bán (SO)',
 }
 STATUSES = ('assigned', 'pushed', 'duplicate', 'error')
+CLIENT_NAME = 'DocSync/1.1'
 
 
 class ErpError(RuntimeError):
     """Failure the user can act on; message never contains the credential."""
+
+    def __init__(self, message: str, status: int = 0):
+        super().__init__(message)
+        self.status = status
 
 
 # ── Suggestions (deterministic; a person always confirms) ──────────────────────
@@ -145,7 +153,7 @@ def walk_today(root: Path, day: dt.date, limit: int = TODAY_LIMIT) -> Iterable[P
 
 
 def today(root: Path | None = None, day: dt.date | None = None, classify: Callable | None = None,
-          state: Path | None = None) -> dict:
+          state: Path | None = None, eim_status: dict | None = None) -> dict:
     """Group today's files by DocSync category, with ERP suggestion + assignment state."""
     root = (root or work_root()).absolute()
     day = day or dt.date.today()
@@ -172,6 +180,8 @@ def today(root: Path | None = None, day: dt.date | None = None, classify: Callab
             'size': info.st_size, 'modified': dt.datetime.fromtimestamp(info.st_mtime).isoformat(timespec='minutes'),
             'too_large': info.st_size > MAX_BYTES, 'suggestion': suggest(relative),
             'erp': state_label, 'assignment': public_assignment(assignment),
+            'eim': {k: v for k, v in ((eim_status or {}).get(relative) or {}).items()
+                    if k in ('status', 'message', 'report_id', 'type', 'at')} or None,
         })
     groups: dict[str, list] = {}
     for row in rows:
@@ -298,7 +308,8 @@ def load_config(state: Path | None = None, env: dict | None = None) -> dict:
 
 class ErpClient:
     def __init__(self, config: dict, opener: Callable | None = None):
-        self.base = config['base_url'] + '/wp-json/ivar/v1/docsync'
+        self.site = config['base_url']
+        self.base = config['base_url'] + '/wp-json/ivar/v1/intake'
         token = base64.b64encode(f"{config['username']}:{config['password']}".encode()).decode()
         self._auth = 'Basic ' + token
         self.timeout = config.get('timeout', 60)
@@ -307,11 +318,14 @@ class ErpClient:
 
     def _call(self, method: str, path: str, query: dict | None = None, body: bytes | None = None,
               content_type: str = '') -> dict:
-        url = self.base + path + ('?' + urllib.parse.urlencode(query) if query else '')
+        # '/wp-json/…' = đường dẫn tuyệt đối trên site (vd plugin eim); còn lại tương đối với /ivar/v1/intake.
+        root = self.site if path.startswith('/wp-json/') else self.base
+        url = root + path + ('?' + urllib.parse.urlencode(query) if query else '')
         request = urllib.request.Request(url, data=body, method=method)
         request.add_header('Authorization', self._auth)
         request.add_header('Accept', 'application/json')
-        request.add_header('User-Agent', 'DocSync/1.0')
+        request.add_header('User-Agent', CLIENT_NAME)
+        request.add_header('X-Intake-Client', CLIENT_NAME)  # chỉ để server ghi nhật ký; xác thực là App Password
         if content_type:
             request.add_header('Content-Type', content_type)
         try:
@@ -324,7 +338,7 @@ class ErpClient:
             except ValueError:
                 message = ''
             hint = {401: 'Sai username/App Password.', 403: 'App Password chưa được duyệt phạm vi DocSync, hoặc không có quyền sửa bản ghi.'}
-            raise ErpError(f'ERP HTTP {error.code}: {message or hint.get(error.code, error.reason)}') from None
+            raise ErpError(f'ERP HTTP {error.code}: {message or hint.get(error.code, error.reason)}', error.code) from None
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise ErpError(f'Không kết nối được ERP: {getattr(error, "reason", error)}') from None
         except ValueError:
@@ -341,9 +355,17 @@ class ErpClient:
 
     def upload(self, path: Path, kind: str, record_id: int, field: str, digest: str,
                ai: bool, ai_mode: str, instruction: str) -> dict:
-        boundary = 'docsync-' + uuid.uuid4().hex
         fields = {'type': kind, 'id': str(int(record_id)), 'field': field, 'sha256': digest,
                   'ai': '1' if ai else '0', 'ai_mode': ai_mode, 'instruction': instruction}
+        return self._multipart('/upload', fields, path)
+
+    def eim_report(self, path: Path, digest: str, kind: str = '', carrier: str = 'GHTK') -> dict:
+        """Đẩy file đối soát GHTK lên plugin eim (hub) — đối soát + lô HĐ nháp + Telegram ở phía ERP."""
+        fields = {'sha256': digest, 'type': kind, 'carrier': carrier}
+        return self._multipart('/wp-json/eim/v1/intake/reconcile-report', fields, path)
+
+    def _multipart(self, endpoint: str, fields: dict, path: Path) -> dict:
+        boundary = 'docsync-' + uuid.uuid4().hex
         parts = []
         for name, value in fields.items():
             parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
@@ -353,7 +375,7 @@ class ErpClient:
                       'Content-Type: application/octet-stream\r\n\r\n').encode())
         parts.append(path.read_bytes())
         parts.append(f'\r\n--{boundary}--\r\n'.encode())
-        return self._call('POST', '/upload', body=b''.join(parts), content_type=f'multipart/form-data; boundary={boundary}')
+        return self._call('POST', endpoint, body=b''.join(parts), content_type=f'multipart/form-data; boundary={boundary}')
 
 
 def push(root: Path, client: ErpClient, paths: Iterable[str] | None = None, dry_run: bool = False,

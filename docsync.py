@@ -2,6 +2,7 @@
 """DocSync command-line Kanban and shared organizer entry point."""
 import docsync_purchase as PURCHASE
 import docsync_erp as ERP
+import docsync_eim as EIM
 import datetime as dt
 import argparse
 import json
@@ -60,6 +61,13 @@ def main(argv=None):
     push = erp_sub.add_parser('push', help='đẩy các file đã gán (mặc định: mọi file chờ / lỗi)')
     push.add_argument('paths', nargs='*')
     push.add_argument('--dry-run', action='store_true')
+    eim = sub.add_parser('eim', help='tự đẩy file đối soát GHTK lên EIM (đối soát + lô HĐ nháp + Telegram)')
+    eim_sub = eim.add_subparsers(dest='eim_command', required=True)
+    eim_sub.add_parser('sync', help='quét và đẩy ngay (timer docsync-eim cũng chạy lệnh này)')
+    eim_status = eim_sub.add_parser('status', help='các file đã đẩy gần đây')
+    eim_status.add_argument('--limit', type=int, default=20)
+    eim_retry = eim_sub.add_parser('retry', help='cho phép đẩy lại một file bị từ chối (sau khi đã sửa)')
+    eim_retry.add_argument('path')
     args = parser.parse_args(argv)
     root = args.year_root.resolve()
     command = args.command or 'board'
@@ -67,6 +75,8 @@ def main(argv=None):
         return print_today(root, args.date, args.json)
     if command == 'erp':
         return run_erp(root, args)
+    if command == 'eim':
+        return run_eim(root, args)
     if command in ('preview', 'apply'):
         if root != work_root().resolve():
             parser.error('preview/apply only support the configured WIP & Reference root')
@@ -147,7 +157,7 @@ ERP_LABELS = {'unassigned': 'chưa gán', 'assigned': 'chờ đẩy', 'stale': '
 
 
 def print_today(root, day, as_json):
-    data = ERP.today(root, day, classifier(root))
+    data = ERP.today(root, day, classifier(root), eim_status=EIM.status_for_paths(ERP.STATE))
     if as_json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
@@ -160,6 +170,8 @@ def print_today(root, day, as_json):
             a = row['assignment']
             if a:
                 line += f"  → {a['type']} #{a['id']} › {a['field']}" + (f" + AI {a['ai_mode']}" if a['ai'] else '')
+            elif row.get('eim'):
+                line += f"  EIM: {row['eim']['status']} · {row['eim'].get('message', '')}"
             elif row['suggestion']:
                 sg = row['suggestion']
                 line += f"  gợi ý: {sg['type']} › {sg['field']}" + (f" (tìm '{sg['query']}')" if sg['query'] else '')
@@ -205,6 +217,35 @@ def run_erp(root, args):
     elif command == 'push':
         for result in ERP.push(root, client, args.paths or None, args.dry_run):
             print(f"  {result['status']:<10} {clean(result['path'])} — {clean(result['message'])}")
+    return 0
+
+
+def run_eim(root, args):
+    state_dir = ERP.STATE
+    if args.eim_command == 'sync':
+        import fcntl
+        with (state_dir / 'organizer.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print('Organizer đang chạy — thử lại sau.')
+                return 75
+            results = EIM.sync(root, ERP.ErpClient(ERP.load_config()), state_dir, log=lambda line: print(clean(line)))
+        if not results:
+            print('Không có file đối soát GHTK mới cần đẩy.')
+        return 0
+    state = EIM.load_state(state_dir)
+    if args.eim_command == 'retry':
+        hits = [key for key, value in state.items() if value.get('path') == args.path]
+        for key in hits:
+            del state[key]
+        EIM.save_state(state_dir, state)
+        print(f'Đã mở lại {len(hits)} bản ghi; lượt sync sau sẽ đẩy lại.' if hits else 'Không thấy file này trong lịch sử EIM.')
+        return 0
+    rows = sorted(state.values(), key=lambda r: r.get('at', ''), reverse=True)[:max(1, args.limit)]
+    print('EIM DocSync: ' + ('bật' if EIM.enabled(state_dir) else 'tắt (thiếu erp.json hoặc eim_auto_push=false)'))
+    for r in rows:
+        print(f"  {r.get('at', '')}  {r.get('status', ''):<9} {clean(r.get('path', ''))} — {clean(r.get('message', ''))}")
     return 0
 
 

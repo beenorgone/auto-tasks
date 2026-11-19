@@ -341,17 +341,22 @@ organizer chuyển trong ngày (mtime hoặc ctime = ngày chọn) theo nhóm ph
 (VD hoá đơn `PO123` → Đơn mua › Hoá đơn, tìm "PO123"). **Không file nào tự đẩy**: người dùng chọn bản ghi, field,
 AI (không / tóm tắt / phân tích → Ghi chú AI trên bản ghi) rồi tick và đẩy.
 
-### Cài một lần
+### Cài một lần (mỗi nhân viên, trên máy của chính người đó)
 
-1. ERP → Cài đặt ERP → Integrations → **AI App Passwords**: thêm user, user tạo Application Password ở hồ sơ WP,
-   admin duyệt phạm vi **DocSync máy tính (đẩy file)** — hoặc **ERP Records MCP + DocSync** nếu cùng credential còn
-   dùng cho agent MCP tra bản ghi. Phạm vi cũ (`erp_full`, `erp_all`) KHÔNG tự có quyền đẩy file.
+DocSync chỉ là một ứng dụng kết nối vào API tiếp nhận file của ERP / eim (hợp đồng API + mô hình bảo mật:
+theme ivarvietnam `docs/api/file-intake.md`). Mỗi người dùng **tài khoản và App Password của chính mình** —
+không dùng chung, không dùng tài khoản admin. Quyền xem / gắn bản ghi, dựng lô… là quyền ERP / eim của người đó.
+
+1. Admin: ERP → Cài đặt ERP → Integrations → **AI App Passwords** → thêm user. Nhân viên tạo Application Password
+   ở hồ sơ WP của mình; admin duyệt phạm vi **Ứng dụng kết nối: đẩy file** (`erp_file_intake`) — hoặc
+   **ERP Records MCP + đẩy file** nếu cùng credential còn dùng cho agent MCP. Phạm vi cũ (`erp_full`, `erp_all`)
+   KHÔNG tự có quyền đẩy file. Nghỉ việc / mất máy → xoá Application Password đó.
 2. Lưu mật khẩu: `mkdir -p ~/.config/docsync && nano ~/.config/docsync/erp-app-password && chmod 600 ~/.config/docsync/erp-app-password`
    (hoặc biến môi trường `DOCSYNC_ERP_APP_PASSWORD`).
 3. Tạo `ivar-documents-organizer/erp.json` (không commit):
 
 ```json
-{"base_url": "https://ivarvietnam.com", "username": "<tên đăng nhập WP>", "password_file": "~/.config/docsync/erp-app-password"}
+{"base_url": "https://ivarvietnam.com", "username": "<tên đăng nhập WP của bạn>", "password_file": "~/.config/docsync/erp-app-password"}
 ```
 
 4. Kiểm tra: `docsync erp check`.
@@ -375,3 +380,29 @@ docsync erp unassign "00_INBOX/Hoa don PO123.pdf"
   user của App Password ở mọi lượt; chỉ THÊM file vào field, không gỡ / thay / sửa dữ liệu nghiệp vụ.
 - AI đi qua gateway ERP (hạn mức 30 lượt/giờ/người, ghi `ivar_ai_runs`); kết quả là Ghi chú AI ở tab ✨ AI của bản ghi.
 - Chỉ mục gán: `ivar-documents-organizer/erp-assignments.json` (không chứa mật khẩu).
+
+## EIM — tự đẩy file đối soát GHTK
+
+Khi có file đối soát GHTK mới (`.xlsx` / `.csv`) trong gốc làm việc, `00_INBOX` hoặc `20_BAO_CAO/GHTK`, timer
+`docsync-eim` (2 phút/lượt) tự đẩy lên eim (hub kế toán trên site ERP) bằng chính credential trong `erp.json`:
+
+| File | Nhận theo tên | eim làm |
+|---|---|---|
+| Báo cáo dòng tiền GHTK (TIỀN HÀNG LẤY THÀNH CÔNG) | `dong tien`, `tien hang lay`… | **Đối soát lấy hàng**: khớp vận đơn ↔ đơn, kiểm CoD, đơn hoàn |
+| Biên bản đối soát thanh toán GHTK | `bien_ban_doi_soat`, `doi soat thanh toan` | **Đối soát thanh toán VC** → auto rules dựng **lô hóa đơn NHÁP** |
+| Tên `GHTK_…` khác | — | eim đọc nội dung để nhận loại |
+
+- **Chỉ file chưa có trên database** mới đối soát: đã đẩy (cùng SHA-256, của bất kỳ ai) hoặc đã upload tay
+  (cùng loại + ngày + tên) → `duplicate`, không chạy lại.
+- Xong → bot Telegram ERP nhắn **người đẩy** + **người duyệt** (option `erp_eim_intake_reviewers` trên ERP) kèm link
+  vào review lô nháp. eim **không** tự đánh dấu "Đã nhận thanh toán" / xác nhận COD — bấm 💰 khi tiền GHTK về.
+- Lỗi mạng / ERP bận: thử lại giãn cách (1 phút → 2 giờ, ≤ 6 lần). File sai định dạng / thiếu quyền: `rejected`,
+  sửa file (nội dung đổi) là tự đẩy lại, hoặc `docsync eim retry <đường dẫn>`.
+- Tắt: thêm `"eim_auto_push": false` vào `erp.json`.
+
+```bash
+cp systemd/docsync-eim.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload
+systemctl --user enable --now docsync-eim.timer
+docsync eim sync      # chạy ngay
+docsync eim status    # lịch sử gần đây; bảng `docsync today` / web cũng hiện cột EIM
+```

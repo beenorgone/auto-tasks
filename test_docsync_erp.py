@@ -27,7 +27,7 @@ class FakeResponse(io.BytesIO):
 
 
 class FakeErp:
-    """Records requests; answers like /wp-json/ivar/v1/docsync/*, dedupes by SHA-256 per field."""
+    """Records requests; answers like /wp-json/ivar/v1/intake/*, dedupes by SHA-256 per field."""
 
     def __init__(self):
         self.requests = []
@@ -35,7 +35,7 @@ class FakeErp:
 
     def __call__(self, request, timeout):
         self.requests.append(request)
-        path = request.full_url.split('/docsync', 1)[1]
+        path = request.full_url.split('/intake', 1)[1]
         if path.startswith('/upload'):
             message = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
                 b'Content-Type: ' + request.get_header('Content-type').encode() + b'\r\n\r\n' + request.data)
@@ -119,7 +119,7 @@ class DocSyncErpTests(unittest.TestCase):
         self.assertIn('AI đang phân tích', result[0]['message'])
         request = self.fake.requests[0]
         self.assertEqual('Basic ' + base64.b64encode(b'ke-toan:abcd efgh').decode(), request.get_header('Authorization'))
-        self.assertTrue(request.full_url.startswith('https://erp.test/wp-json/ivar/v1/docsync/upload'))
+        self.assertTrue(request.full_url.startswith('https://erp.test/wp-json/ivar/v1/intake/upload'))
         self.assertEqual(('Hoá đơn PO42 Acme.pdf', b'%PDF-1.4 invoice'), self.fake.last_file)
         saved = ERP.load_assignments(self.state)[relative]
         self.assertEqual('pushed', saved['status'])

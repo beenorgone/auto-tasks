@@ -21,6 +21,7 @@ from typing import Any
 from docsync_core import board, health, WIP
 from docsync_paths import work_root
 import docsync_erp as ERP
+import docsync_eim as EIM
 import sqlite3
 import urllib.parse
 
@@ -226,6 +227,7 @@ function row(f){
   if(a){erp.append(el('div',{class:'muted',textContent:`${TYPES[a.type]||a.type} · ${a.label||('#'+a.id)} › ${a.field_label||a.field}${a.ai?' · AI '+(a.ai_mode==='analysis'?'phân tích':'tóm tắt'):''}`}));
     if(a.message)erp.append(el('div',{class:'muted',textContent:a.message}));
     if(a.record_url)erp.append(el('a',{href:a.record_url,target:'_blank',rel:'noopener noreferrer',textContent:'Mở bản ghi'}));}
+  else if(f.eim)erp.append(el('div',{class:'muted',textContent:`EIM tự đẩy: ${f.eim.status==='sent'?'đã gửi':f.eim.status==='duplicate'?'đã có':f.eim.status==='retry'?'sẽ thử lại':'bị từ chối'} · ${f.eim.message||''}`}));
   else if(f.suggestion)erp.append(el('div',{class:'muted',textContent:`Gợi ý: ${f.suggestion.label}${f.suggestion.query?' · tìm “'+f.suggestion.query+'”':''}`}));
   const act=el('td',{});const tr=el('tr',{},el('td',{},box),info,erp,act);
   if(!f.too_large){const btn=el('button',{class:'small tonal',textContent:a?'Sửa gán':'Gán bản ghi'});btn.onclick=()=>openEditor(f,info,btn);act.append(btn);}
@@ -330,7 +332,7 @@ def erp_get(path: str, query: dict, year_root: Path, client_factory=None) -> dic
     one = lambda key: (query.get(key) or [''])[0]
     if path == '/api/today':
         day = dt.date.fromisoformat(one('date')) if one('date') else None
-        return ERP.today(year_root, day, erp_classifier(year_root))
+        return ERP.today(year_root, day, erp_classifier(year_root), eim_status=EIM.status_for_paths(ERP.STATE))
     client = (client_factory or (lambda: ERP.ErpClient(ERP.load_config())))()
     kind = one('type')
     if kind not in ERP.TYPES:

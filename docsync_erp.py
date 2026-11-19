@@ -61,9 +61,10 @@ CLIENT_NAME = 'DocSync/1.1'
 class ErpError(RuntimeError):
     """Failure the user can act on; message never contains the credential."""
 
-    def __init__(self, message: str, status: int = 0):
+    def __init__(self, message: str, status: int = 0, code: str = ''):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 # ── Suggestions (deterministic; a person always confirms) ──────────────────────
@@ -335,14 +336,19 @@ class ErpClient:
             try:
                 payload = json.loads(error.read().decode('utf-8') or '{}')
                 message = payload.get('message') or payload.get('code') or ''
+                code = str(payload.get('code') or '')
             except ValueError:
-                message = ''
+                message, code = '', ''
             hint = {401: 'Sai username/App Password.', 403: 'App Password chưa được duyệt phạm vi DocSync, hoặc không có quyền sửa bản ghi.'}
-            raise ErpError(f'ERP HTTP {error.code}: {message or hint.get(error.code, error.reason)}', error.code) from None
+            raise ErpError(f'ERP HTTP {error.code}: {message or hint.get(error.code, error.reason)}', error.code, code) from None
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise ErpError(f'Không kết nối được ERP: {getattr(error, "reason", error)}') from None
         except ValueError:
             raise ErpError('ERP trả về dữ liệu không phải JSON.') from None
+
+    def flows(self) -> list:
+        """Luồng tự động người dùng này đã được người duyệt bảo mật cho phép (server quyết định)."""
+        return self._call('GET', '/flows').get('flows', [])
 
     def types(self) -> dict:
         return self._call('GET', '/types')

@@ -15,7 +15,12 @@ Chạy bằng timer (systemd/docsync-eim.timer) hoặc `docsync eim sync`. Mỗi
      → `rejected`, không thử lại tới khi file đổi nội dung.
 Không xác nhận tiền: EIM để nút "Đã nhận thanh toán" cho người duyệt.
 
-Bật/tắt: `"eim_auto_push": false` trong ivar-documents-organizer/erp.json (mặc định bật khi đã có erp.json).
+TÙY CHỌN, MẶC ĐỊNH TẮT — hai lớp, cả hai phải bật:
+  1. máy này: `"auto_flows": ["eim_pickup_cashflow", "eim_carrier_delivery"]` trong ivar-documents-organizer/erp.json
+     (chỉ nhóm file có luồng trong danh sách mới được đẩy; không khai = không đẩy gì);
+  2. server: người duyệt bảo mật bật luồng đó cho tài khoản này (ERP → AI App Passwords → Luồng tự động).
+     Server chưa duyệt → 403 `intake_flow_disabled` → `blocked`, thử lại sau 6 giờ, không đẩy dồn.
+Dựng lô nháp / tự chuyển Đã hoàn thành là luồng riêng ở server, client không bật được.
 """
 from __future__ import annotations
 
@@ -39,6 +44,8 @@ RETRY_DELAYS = (60, 300, 900, 1800, 3600, 7200)
 MAX_BYTES = 20 * 1024 * 1024
 FOLDERS = ('', '00_INBOX', '00_INBOX/Hoa don', '20_BAO_CAO/GHTK', 'AT. GHTK reports')
 KEEP = 400
+BLOCKED_RECHECK = 6 * 3600
+FLOWS = {'pickup_cashflow': 'eim_pickup_cashflow', 'carrier_delivery': 'eim_carrier_delivery'}
 
 
 def _plain(text: str) -> str:
@@ -101,17 +108,30 @@ def save_state(state_dir: Path, data: dict) -> None:
 def due(record: dict | None, now: float) -> bool:
     if not record:
         return True
-    if record.get('status') != 'retry':
+    if record.get('status') not in ('retry', 'blocked'):
         return False  # sent / duplicate / rejected: xong với đúng bản file này
     return now >= float(record.get('next_at', 0))
 
 
-def sync(root: Path, client, state_dir: Path, now: float | None = None, log=print) -> list[dict]:
+def wanted(kind: str, flows: set[str]) -> bool:
+    """Nhóm file có nằm trong danh sách luồng máy này cho phép không ('' = để server đọc nội dung)."""
+    if kind == '':
+        return bool(flows & set(FLOWS.values()))
+    return FLOWS.get(kind, '') in flows
+
+
+def sync(root: Path, client, state_dir: Path, now: float | None = None, log=print,
+         flows: set[str] | None = None) -> list[dict]:
     """Một lượt quét. Người gọi giữ organizer.lock. Trả danh sách kết quả của lượt này."""
     now = time.time() if now is None else now
+    flows = local_flows(state_dir) if flows is None else flows
+    if not flows:
+        return []
     state = load_state(state_dir)
     results = []
     for path, kind in candidates(root):
+        if not wanted(kind, flows):
+            continue
         info = path.stat()
         if now - max(info.st_mtime, info.st_ctime) < SETTLE_SECONDS:
             continue  # còn đang tải / đang được organizer chuyển
@@ -132,6 +152,14 @@ def sync(root: Path, client, state_dir: Path, now: float | None = None, log=prin
                          report_id=response.get('report_id'), report_date=response.get('report_date', ''),
                          message=_describe(response))
         except ERP.ErpError as error:
+            if error.code == 'intake_flow_disabled':
+                # Chưa được duyệt ở server: không phải lỗi file — kiểm lại thưa, không dồn request.
+                entry.update(status='blocked', next_at=now + BLOCKED_RECHECK, attempts=0, message=str(error))
+                state[digest] = entry
+                save_state(state_dir, state)
+                results.append(entry)
+                log(f"EIM: {relative} — blocked · {entry['message']}")
+                continue
             transient = error.status in (0, 409, 429) or error.status >= 500
             if transient and attempts <= len(RETRY_DELAYS):
                 entry.update(status='retry', next_at=now + RETRY_DELAYS[attempts - 1], message=str(error))
@@ -140,7 +168,7 @@ def sync(root: Path, client, state_dir: Path, now: float | None = None, log=prin
         state[digest] = entry
         save_state(state_dir, state)  # sau mỗi file: dừng giữa chừng không mất kết quả đã gửi
         results.append(entry)
-        log(f"EIM DocSync: {relative} — {entry['status']} · {entry['message']}")
+        log(f"EIM: {relative} — {entry['status']} · {entry['message']}")
     return results
 
 
@@ -150,7 +178,8 @@ def _describe(r: dict) -> str:
     label = 'thanh toán VC' if r.get('type') == 'carrier_delivery' else 'lấy hàng'
     text = f"Đối soát {label} #{r.get('report_id')} · khớp {r.get('matched', 0)}, không khớp {r.get('unmatched', 0)}"
     if r.get('type') == 'carrier_delivery':
-        text += ' · đang dựng lô HĐ nháp, Telegram sẽ báo khi xong'
+        text += (' · tự dựng lô nháp đang tắt cho tài khoản này' if r.get('batches_disabled')
+                 else ' · đang dựng lô HĐ nháp, Telegram sẽ báo khi xong')
     return text
 
 
@@ -162,12 +191,18 @@ def status_for_paths(state_dir: Path) -> dict[str, dict]:
     return out
 
 
-def enabled(state_dir: Path) -> bool:
+def local_flows(state_dir: Path) -> set[str]:
+    """Luồng máy này được phép tự đẩy (erp.json → auto_flows). Không khai / sai = rỗng = tắt."""
     try:
         config = json.loads((state_dir / ERP.CONFIG_NAME).read_text(encoding='utf-8'))
     except (OSError, ValueError):
-        return False
-    return config.get('eim_auto_push', True) is not False
+        return set()
+    raw = config.get('auto_flows', [])
+    return {f for f in raw if f in FLOWS.values()} if isinstance(raw, list) else set()
+
+
+def enabled(state_dir: Path) -> bool:
+    return bool(local_flows(state_dir))
 
 
 def main() -> int:

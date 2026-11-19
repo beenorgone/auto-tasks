@@ -398,7 +398,14 @@ Khi có file đối soát GHTK mới (`.xlsx` / `.csv`) trong gốc làm việc,
   vào review lô nháp. eim **không** tự đánh dấu "Đã nhận thanh toán" / xác nhận COD — bấm 💰 khi tiền GHTK về.
 - Lỗi mạng / ERP bận: thử lại giãn cách (1 phút → 2 giờ, ≤ 6 lần). File sai định dạng / thiếu quyền: `rejected`,
   sửa file (nội dung đổi) là tự đẩy lại, hoặc `docsync eim retry <đường dẫn>`.
-- Tắt: thêm `"eim_auto_push": false` vào `erp.json`.
+- **Tùy chọn, mặc định TẮT — phải bật ở cả 2 nơi:**
+  1. Máy này, trong `erp.json`: `"auto_flows": ["eim_pickup_cashflow", "eim_carrier_delivery"]` — chỉ nhóm file có
+     trong danh sách mới tự đẩy (bỏ một mục = tắt nhóm đó).
+  2. Server: người duyệt bảo mật bật luồng cho đúng tài khoản ở ERP → AI App Passwords → **Luồng tự động**.
+     Chưa duyệt → file ở trạng thái `blocked`, 6 giờ kiểm lại một lần.
+  Các bước sâu hơn là luồng riêng chỉ bật ở server: **tự dựng lô nháp** (`eim_carrier_draft_batches`),
+  **tự chuyển Đã hoàn thành** (`eim_carrier_auto_complete`), **kèm AI khi gắn file ERP** (`erp_attach_ai`).
+  Xem tài khoản mình được gì: `docsync erp flows`.
 
 ```bash
 cp systemd/docsync-eim.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload

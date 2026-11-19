@@ -42,6 +42,7 @@ def main(argv=None):
     erp = sub.add_parser('erp', help='kết nối ERP IVAR: tra bản ghi, gán file, đẩy file')
     erp_sub = erp.add_subparsers(dest='erp_command', required=True)
     erp_sub.add_parser('check', help='kiểm tra kết nối + App Password')
+    erp_sub.add_parser('flows', help='luồng tự động tài khoản này đã được người duyệt bảo mật cho phép')
     find = erp_sub.add_parser('find', help='tìm bản ghi được sửa')
     find.add_argument('type', choices=sorted(ERP.TYPES))
     find.add_argument('query', nargs='?', default='')
@@ -188,9 +189,13 @@ def run_erp(root, args):
         print('Đã bỏ gán.' if ERP.unassign(args.path) else 'File chưa được gán.')
         return 0
     client = None
-    if command != 'assign' or not args.no_verify:
+    if command not in ('assign',) or not args.no_verify:
         client = ERP.ErpClient(ERP.load_config())
-    if command == 'check':
+    if command == 'flows':
+        for flow in client.flows():
+            print(f"  {'✅' if flow['allowed'] else '⛔'} {flow['flow']:<28} {clean(flow['label'])} · rủi ro: {clean(flow['risk'])}")
+        print('Bật / tắt: chỉ người duyệt bảo mật, ở ERP → AI App Passwords → Luồng tự động.')
+    elif command == 'check':
         types = client.types().get('types', [])
         print('Kết nối ERP OK · ' + ', '.join(t['type'] for t in types))
     elif command == 'find':
@@ -243,7 +248,9 @@ def run_eim(root, args):
         print(f'Đã mở lại {len(hits)} bản ghi; lượt sync sau sẽ đẩy lại.' if hits else 'Không thấy file này trong lịch sử EIM.')
         return 0
     rows = sorted(state.values(), key=lambda r: r.get('at', ''), reverse=True)[:max(1, args.limit)]
-    print('EIM DocSync: ' + ('bật' if EIM.enabled(state_dir) else 'tắt (thiếu erp.json hoặc eim_auto_push=false)'))
+    flows = EIM.local_flows(state_dir)
+    print('Tự đẩy EIM trên máy này: ' + (', '.join(sorted(flows)) if flows else 'TẮT (khai auto_flows trong erp.json)')
+          + ' · server còn phải duyệt từng luồng — xem: docsync erp flows')
     for r in rows:
         print(f"  {r.get('at', '')}  {r.get('status', ''):<9} {clean(r.get('path', ''))} — {clean(r.get('message', ''))}")
     return 0

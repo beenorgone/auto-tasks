@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+import docsync_intake
 from docsync_core import ROOT, WIP, STAGES, LABELS, board, health
 from docsync_paths import work_root
 
@@ -33,7 +34,10 @@ def main(argv=None):
     state = sub.add_parser('set-status')
     state.add_argument('dossier')
     state.add_argument('status', choices=WIP.VALID_STATUSES)
+    docsync_intake.register(sub.add_parser('intake', help='xem trước hoặc gửi file đến ERP/EIM'))
     args = parser.parse_args(argv)
+    if args.command == 'intake':
+        return docsync_intake.execute(args)
     root = args.year_root.resolve()
     command = args.command or 'board'
     if command in ('preview', 'apply'):

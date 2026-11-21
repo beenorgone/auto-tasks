@@ -86,6 +86,43 @@ Nếu shell chưa nhận lệnh, gọi trực tiếp:
 /home/beenorgone/Documents/.auto-tasks/docsync board
 ```
 
+### Gửi file đã chọn lên ERP hoặc đối soát GHTK
+
+`docsync intake` dùng Application Password của chính tài khoản WordPress được
+duyệt phạm vi đẩy file và luồng tương ứng. Mật khẩu nhập ẩn trong terminal ở
+mỗi lần gọi. Có thể đặt `DOCSYNC_ERP_USER` để điền sẵn tên đăng nhập hoặc
+`DOCSYNC_ERP_URL` để chọn một site thử nghiệm HTTPS. Site mặc định là
+`https://ivarvietnam.com`.
+
+```bash
+docsync intake flows
+docsync intake targets --type po --query 1234
+docsync intake record --type po --id 1234
+docsync intake attach ./hosomuahang.pdf --type po --id 1234 --field FIELD_KEY
+docsync intake attach ./hosomuahang.pdf --type po --id 1234 --field FIELD_KEY --send
+```
+
+Thay `FIELD_KEY` bằng `key` từ lệnh `record`. Lệnh thiếu `--send`
+chỉ tra quyền và đích trên site, rồi tính SHA-256 cục bộ để xem trước.
+`--ai-mode summary` hoặc `--ai-mode analysis` yêu cầu luồng `erp_attach_ai`
+và gửi nội dung file tới nhà cung cấp AI đã cấu hình để tạo Ghi chú AI.
+
+```bash
+docsync intake reconcile ./ghtk.csv --type carrier_delivery
+docsync intake reconcile ./ghtk.csv --type carrier_delivery --send
+docsync intake report SHA256_TU_KET_QUA
+```
+
+Dùng `pickup_cashflow` cho báo cáo dòng tiền lấy hàng. Luồng này có thể
+xếp đơn sang Đang giao. Với `carrier_delivery`, bản xem trước hiện quyền
+dựng lô hóa đơn nháp và tự hoàn thành đơn. Nếu quyền tự hoàn thành đang bật,
+lệnh gửi yêu cầu thêm `--allow-order-completion`. Các quyền thực thi do
+site kiểm tra lúc nhận file và lúc chạy tác vụ nền.
+Nếu kết quả là `building`, tra tiếp bằng lệnh `report`. Khi mất kết nối,
+kiểm tra theo SHA-256 trước khi gửi lại. File nguồn vẫn ở trên máy và file
+trùng được API nhận diện theo nội dung. Chỉ lệnh `intake` có `--send`
+gửi file. Watcher và Telegram Inbox tiếp tục quy trình lưu cục bộ.
+
 ## 2. Quy trình làm việc hằng ngày
 
 ### Bước 1 — Quét và xem hồ sơ

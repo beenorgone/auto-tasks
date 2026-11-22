@@ -7,7 +7,7 @@
 
 # Hướng dẫn DocSync
 
-DocSync nhận diện và sắp xếp tài liệu, theo dõi hồ sơ trên Kanban và hiển thị việc cần làm tiếp theo. Có thể sử dụng bằng terminal hoặc giao diện web cục bộ.
+DocSync nhận diện và sắp xếp tài liệu, hiển thị việc cần làm tiếp theo và theo dõi lịch sử phân loại. Có thể sử dụng bằng terminal hoặc giao diện web cục bộ.
 
 - Thư mục chương trình: `/home/beenorgone/Documents/.auto-tasks`
 - Giao diện web: <http://127.0.0.1:8787>
@@ -88,6 +88,24 @@ Nếu shell chưa nhận lệnh, gọi trực tiếp:
 
 ### Gửi file đã chọn lên ERP hoặc đối soát GHTK
 
+Mở [File trong ngày](http://127.0.0.1:8787/day) để xem và phân loại file theo ngày
+trên máy. Bảng lấy file mới, vừa chuyển hoặc vừa cập nhật trong **WIP & Reference** và
+hiển thị nhóm từ quy tắc WIP. File tạm, file hệ thống, liên kết và bản trùng đã cách ly
+được bỏ qua.
+Thanh tab chung mở **Tổng quan**, **File trong ngày**, **Lịch sử hôm nay** và **Workflows**.
+Tab **Lịch sử hôm nay** hiển thị lần phân loại gần nhất trong ngày của từng file,
+gồm nhóm, nguồn, đích và kết quả đã chuyển hoặc chờ duyệt.
+
+Để gắn một file, bấm **Gắn vào ERP**, chọn loại bản ghi, tìm bằng mã hoặc tên, rồi chọn
+bản ghi và trường nhận file. Nếu tài khoản và bản ghi hỗ trợ AI, bạn có thể bật
+**Phân tích file và tạo Ghi chú AI** trước khi bấm **Gắn file lên ERP**. Kết quả báo
+file đã gắn hay đã tồn tại và AI có được xếp hàng hay chưa. Bảng này giữ file nguồn trên máy.
+
+Mục **Tài khoản gửi ERP** lưu riêng Application Password đã duyệt `erp_attach` trên máy.
+Nếu chưa lưu riêng, DocSync dùng tài khoản Workflows đã có. Các báo cáo đủ điều kiện
+cho luồng tự động đang bật tiếp tục do watcher xử lý và hiện liên kết **Theo luồng EIM
+tự động** cùng kết quả nếu đã có.
+
 `docsync intake` dùng Application Password của chính tài khoản WordPress được
 duyệt phạm vi đẩy file và luồng tương ứng. Mật khẩu nhập ẩn trong terminal ở
 mỗi lần gọi. Có thể đặt `DOCSYNC_ERP_USER` để điền sẵn tên đăng nhập hoặc
@@ -120,8 +138,38 @@ lệnh gửi yêu cầu thêm `--allow-order-completion`. Các quyền thực th
 site kiểm tra lúc nhận file và lúc chạy tác vụ nền.
 Nếu kết quả là `building`, tra tiếp bằng lệnh `report`. Khi mất kết nối,
 kiểm tra theo SHA-256 trước khi gửi lại. File nguồn vẫn ở trên máy và file
-trùng được API nhận diện theo nội dung. Chỉ lệnh `intake` có `--send`
-gửi file. Watcher và Telegram Inbox tiếp tục quy trình lưu cục bộ.
+trùng được API nhận diện theo nội dung. Trong CLI, dùng `--send` để gửi file.
+Telegram Inbox tiếp tục quy trình lưu cục bộ.
+
+### Quản lý workflows tự động trên máy
+
+Mở [Workflows tự động](http://127.0.0.1:8787/workflows). Các cột **Đang bật**, **Đang tắt**
+và **Đề xuất** cho biết file đầu vào, tác vụ và bước tiếp theo. Công tắc **Phân loại chứng từ
+trên máy** điều khiển watcher. Lịch Documents Organizer định kỳ và cầu nối Telegram chạy riêng.
+
+**GHTK · Đối soát lấy hàng** mặc định tắt. Lưu username WordPress và Application Password đã
+được duyệt `eim_pickup_cashflow` trong mục **Tài khoản gửi EIM**, sau đó bật luồng. DocSync
+lưu thông tin trong cấu hình người dùng `~/.config/docsync/intake.json` (hoặc theo
+`XDG_CONFIG_HOME`), với quyền đọc ghi chỉ cho người dùng hiện tại. Lưu tài khoản watcher
+mới sẽ tắt các luồng đối soát tự động để bạn duyệt và bật lại khi sẵn sàng.
+
+Watcher nhận XLSX có tên mẫu **GHTK_bao_cao_van_hanh_va_dong_tien_DD_MM_S…** và có sheet
+**BC Dòng tiền** trong `Giao vận/GHTK`. Chỉ file tạo hoặc cập nhật sau khi bật và ổn định ít
+nhất 20 giây mới được chọn. Kết quả gần đây hiện mã báo cáo và số đơn khớp, chưa khớp.
+Nếu DocSync đang dùng bố cục cũ, watcher cũng nhận file trong thư mục GHTK của bố cục đó.
+Lỗi tạm thời có thời gian chờ trước khi thử lại. Đơn đủ điều kiện có thể được xếp hàng sang
+**Đang giao**. Lỗi hoặc file sai mẫu hiện **Cần kiểm tra**.
+
+**GHTK · Đối soát thanh toán** nhận biên bản CSV/XLSX có tên mẫu
+`bien_ban_doi_soat_S…` trong `Giao vận/GHTK`. Watcher kiểm tra tiêu đề của mẫu trước
+khi gửi. Tài khoản cần được duyệt `eim_carrier_delivery`. Bật thêm **Dựng lô hóa đơn nháp**
+khi tài khoản được duyệt `eim_carrier_draft_batches`. DocSync chọn chế độ tương ứng
+cho từng biên bản. EIM giữ trạng thái đơn WooCommerce và xác nhận thanh toán ngoài
+hai chế độ này. Quyền được kiểm tra lại ở mỗi lượt. File đã có trước thời điểm bật
+được giữ nguyên.
+
+Hồ sơ PO/QC dùng thao tác **Gắn vào ERP** trong tab **File trong ngày**. Hóa đơn,
+sao kê và báo cáo sàn tiếp tục được phân loại cục bộ theo quy tắc đang dùng.
 
 ## 2. Quy trình làm việc hằng ngày
 
@@ -260,14 +308,15 @@ Mở <http://127.0.0.1:8787> trên máy chạy DocSync.
 
 | Điều khiển | Chức năng |
 |---|---|
-| Preview routing | Xem trước thao tác, sau đó cập nhật Kanban |
-| Refresh Kanban | Quét lại chỉ mục và dashboard |
-| Open Kanban | Mở dashboard hồ sơ |
+| Preview routing | Xem trước thao tác, sau đó cập nhật chỉ mục |
+| Cập nhật phân loại | Quét lại chỉ mục phân loại |
+| Lịch sử hôm nay | Xem các lượt đã phân loại hoặc đang chờ duyệt |
 | Apply changes | Mở bước xác nhận chạy organizer |
 | Also run the final rclone project sync | Bật thêm đồng bộ ra ngoài cho lần Apply đó |
-| System health · Intake Kanban | Xem watcher, lịch chạy, số lượng hồ sơ và việc tiếp theo |
+| System health · Intake | Xem watcher, lịch chạy, số lượng hồ sơ và việc tiếp theo |
 
-Thông tin sức khỏe và hàng đợi trên web được làm mới theo chu kỳ 30 giây. Dashboard HTML được tạo khi Scan/Preview/Apply hoàn tất; mở lại trang Kanban để xem bản mới.
+Thông tin sức khỏe và hàng đợi trên web được làm mới theo chu kỳ 30 giây. Bấm **Làm mới** trong
+**Lịch sử hôm nay** để đọc các lượt phân loại vừa ghi nhận.
 
 ## 6. Tự động chạy và khóa chống trùng
 

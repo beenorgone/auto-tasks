@@ -1,6 +1,8 @@
 """Canonical year-local folder layout. Folder names describe content, not workflow state."""
 from pathlib import Path
 
+GHTK_WORKFLOW_FOLDER = 'Giao vận/GHTK'
+
 REPORT_TARGETS = {
     'vat': '20_BAO_CAO/VAT',
     'shopee_reports': '20_BAO_CAO/Shopee',

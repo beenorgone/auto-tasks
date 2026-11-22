@@ -23,10 +23,17 @@ ERP = '/wp-json/ivar/v1/intake'
 EIM = '/wp-json/eim/v1/intake/reconcile-report'
 REPORT_TYPES = ('pickup_cashflow', 'carrier_delivery')
 CHUNK_BYTES = 256 * 1024
+DEFAULT_ORIGIN = 'https://ivarvietnam.com'
+CARRIER_RECONCILE = 'reconcile_only'
+CARRIER_DRAFT = 'draft_only'
 
 
 class IntakeError(ValueError):
     """A request or local preflight failed."""
+
+    def __init__(self, message, *, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -74,10 +81,10 @@ class IntakeClient:
                     code = ''
                 code = code if isinstance(code, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', code) else ''
             detail = f' ({code})' if code else ''
-            raise IntakeError(f'{request.get_method()} {path}: HTTP {error.code}{detail}') from None
+            raise IntakeError(f'{request.get_method()} {path}: HTTP {error.code}{detail}', status=error.code) from None
         except (OSError, HTTPException):
             advice = ' Kiểm tra trạng thái trước khi gửi lại.' if upload else ''
-            raise IntakeError(f'Không nhận được phản hồi từ API {path}.{advice}') from None
+            raise IntakeError(f'Không nhận được phản hồi từ API {path}.{advice}', status=0) from None
 
 
 def response_json(response):
@@ -115,10 +122,11 @@ def multipart(filename, stream, size, fields):
 
 
 @contextmanager
-def selected_file(path, limit, send):
+def selected_file(path, limit, send, open_source=None):
     # Nonblocking open also handles a FIFO selected accidentally on the local filesystem.
     with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as snapshot:
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), 'rb') as stream:
+        source = open_source(path) if open_source else os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), 'rb')
+        with source as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise IntakeError('Chọn một file thông thường.')
@@ -133,13 +141,14 @@ def selected_file(path, limit, send):
                 digest.update(chunk)
                 if send:
                     snapshot.write(chunk)
-            if size != info.st_size or os.fstat(stream.fileno()).st_mtime_ns != info.st_mtime_ns:
+            final = os.fstat(stream.fileno())
+            if size != info.st_size or (final.st_mtime_ns, final.st_ctime_ns) != (info.st_mtime_ns, info.st_ctime_ns):
                 raise IntakeError('File đang thay đổi. Chọn lại sau khi file được lưu xong.')
         snapshot.seek(0)
         yield snapshot, size, digest.hexdigest()
 
 
-def preflight(client, args):
+def access_policy(client):
     _, policy = client.request(ERP + '/flows')
     if policy.get('policy') != 'guard' or not isinstance(policy.get('flows'), list):
         raise IntakeError('Site chưa trả về chính sách App Password Guard cho ứng dụng kết nối.')
@@ -149,6 +158,30 @@ def preflight(client, args):
     limit = quota.get('max_file_bytes') if isinstance(quota, dict) else None
     if type(limit) is not int or limit <= 0:
         raise IntakeError('Site chưa trả về giới hạn dung lượng một file.')
+    return allowed, limit
+
+
+def require_carrier_mode(client, allowed, mode):
+    if mode not in (CARRIER_RECONCILE, CARRIER_DRAFT):
+        raise IntakeError('Chế độ đối soát thanh toán không hợp lệ.')
+    if 'eim_carrier_delivery' not in allowed:
+        raise IntakeError('Tài khoản chưa được duyệt đối soát thanh toán GHTK trên IVAR.', status=403)
+    if mode == CARRIER_DRAFT and 'eim_carrier_draft_batches' not in allowed:
+        raise IntakeError('Tài khoản chưa được duyệt dựng lô hóa đơn nháp trên IVAR.', status=403)
+    try:
+        _, policy = client.request(EIM)
+    except IntakeError as error:
+        if error.status == 404:
+            raise IntakeError('EIM chưa hỗ trợ gửi riêng theo chế độ đối soát hoặc dựng lô nháp.', status=403) from None
+        raise
+    modes = policy.get('carrier_modes')
+    if not isinstance(modes, list) or mode not in modes:
+        raise IntakeError('EIM chưa xác nhận hỗ trợ chế độ thanh toán đã chọn.', status=403)
+
+
+def preflight(client, args):
+    allowed, limit = access_policy(client)
+    carrier_mode = getattr(args, 'carrier_mode', None)
 
     if args.action == 'attach':
         flow = 'erp_attach'
@@ -163,6 +196,9 @@ def preflight(client, args):
         fields = {'type': args.type, 'carrier': 'GHTK'}
         route = EIM
         limit = min(limit, 20 * 1024 * 1024)
+        if args.type == 'carrier_delivery' and carrier_mode:
+            require_carrier_mode(client, allowed, carrier_mode)
+            fields['carrier_mode'] = carrier_mode
         if args.file.suffix.lower() not in ('.csv', '.xlsx'):
             raise IntakeError('Đối soát GHTK nhận file CSV hoặc XLSX.')
     if flow not in allowed:
@@ -181,14 +217,14 @@ def preflight(client, args):
         if args.ai_mode and target.get('ai_available') is not True:
             raise IntakeError('AI xử lý tài liệu hiện chưa khả dụng trên site.')
     if args.action == 'reconcile' and args.type == 'carrier_delivery':
-        preview['draft_batches'] = 'eim_carrier_draft_batches' in allowed
-        preview['auto_complete_orders'] = 'eim_carrier_auto_complete' in allowed
+        preview['draft_batches'] = carrier_mode != CARRIER_RECONCILE and 'eim_carrier_draft_batches' in allowed
+        preview['auto_complete_orders'] = not carrier_mode and 'eim_carrier_auto_complete' in allowed
         if preview['auto_complete_orders'] and args.send and not args.allow_order_completion:
             raise IntakeError('Tài khoản có luồng tự hoàn thành đơn. Xem kết quả preview trước khi dùng --allow-order-completion.')
     return route, fields, limit, preview
 
 
-def run(args, client):
+def run(args, client, *, validate_snapshot=None, open_source=None):
     if args.action == 'flows':
         return client.request(ERP + '/flows')[1]
     if args.action == 'targets':
@@ -199,14 +235,17 @@ def run(args, client):
         return client.request(EIM + '/' + args.sha256)[1]
 
     route, fields, limit, preview = preflight(client, args)
-    with selected_file(args.file, limit, args.send) as (stream, size, sha256):
+    with selected_file(args.file, limit, args.send, open_source) as (stream, size, sha256):
         if not args.send:
             return dict(preview, file=args.file.name, bytes=size, sha256=sha256)
+        if validate_snapshot is not None:
+            validate_snapshot(stream)
+            stream.seek(0)
         fields['sha256'] = sha256
         try:
             status, result = client.request(route, upload=(args.file.name, stream, size, fields))
         except IntakeError as error:
-            raise IntakeError(f'{error} SHA-256: {sha256}') from None
+            raise IntakeError(f'{error} SHA-256: {sha256}', status=error.status) from None
     if args.action == 'attach':
         valid = (status, result.get('status')) in ((200, 'duplicate'), (201, 'uploaded'))
     else:
@@ -254,7 +293,7 @@ def execute(args):
         raise IntakeError('Chạy lệnh intake trong terminal tương tác để nhập Application Password.')
     username = os.getenv('DOCSYNC_ERP_USER') or input('Tên đăng nhập WordPress: ').strip()
     password = getpass.getpass('WordPress Application Password: ')
-    origin = os.getenv('DOCSYNC_ERP_URL', 'https://ivarvietnam.com')
+    origin = os.getenv('DOCSYNC_ERP_URL', DEFAULT_ORIGIN)
     output = run(args, IntakeClient(origin, username, password))
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

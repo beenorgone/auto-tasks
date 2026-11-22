@@ -1,0 +1,10 @@
+.ds-shell{background:#f7effb;border-bottom:1px solid #e5dbea;color:#261c34}
+.ds-shell-inner{display:flex;align-items:center;gap:24px;max-width:1240px;margin:auto;padding:10px 22px;font:15px/1.4 Roboto,Arial,sans-serif}
+.ds-shell a{text-decoration:none}
+.ds-shell .ds-brand{font-size:19px;font-weight:800;letter-spacing:-.045em;color:#332052;white-space:nowrap}
+.ds-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.ds-tabs a{display:inline-flex;align-items:center;min-height:38px;padding:7px 13px;border-radius:20px;color:#50455c;font-size:14px;font-weight:600;white-space:nowrap}
+.ds-tabs a:hover,.ds-shell a:focus-visible{background:#e9ddf4}
+.ds-tabs a[aria-current=page]{background:#dfcef3;color:#2f1b51}
+.ds-shell a:focus-visible{outline:2px solid #564089;outline-offset:2px}
+@media(max-width:560px){.ds-shell-inner{gap:5px;align-items:flex-start;flex-direction:column;padding:10px 12px}.ds-tabs a{padding-inline:9px;font-size:13px}}

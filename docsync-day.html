@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>File trong ngày · DocSync</title>
+<meta name="docsync-token" content=__DOCSYNC_TOKEN__>
+<style>
+:root{color-scheme:light;--ink:#201d26;--muted:#61586a;--line:#e7dfea;--surface:#fffbfe;--tonal:#eee5fb;--primary:#564089;--good:#245e38;--error:#9b231d}
+*{box-sizing:border-box}body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.45 Roboto,Arial,sans-serif}
+main{max-width:1240px;margin:auto;padding:28px 22px 48px}nav{display:flex;gap:18px;flex-wrap:wrap}a{color:var(--primary);font-weight:600}
+h1{margin:20px 0 6px;font-size:clamp(30px,5vw,44px);letter-spacing:-.035em;line-height:1.2}h2{margin:0 0 8px;font-size:23px}
+p{margin:0;color:var(--muted)}label{font-weight:600;font-size:14px}button,input,select{font:inherit}
+button{border:0;border-radius:22px;padding:9px 15px;background:var(--primary);color:white;font-weight:600;cursor:pointer}
+button.secondary{background:var(--tonal);color:#352157}button:disabled{opacity:.55;cursor:default}
+input:not([type=checkbox]),select{width:100%;min-width:0;max-width:100%;border:1px solid #9a8da4;background:white;color:var(--ink);border-radius:9px;padding:8px 10px}
+input[type=checkbox]{accent-color:var(--primary);width:17px;height:17px;margin:0}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.account{margin:18px 0;border:1px solid var(--line);border-radius:14px;background:#f8f2fa;padding:11px 14px}
+summary{cursor:pointer;color:var(--primary);font-weight:600}.account form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:10px 0}.account label{flex:1 1 180px}.account input{margin-top:4px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:18px 0 12px}.toolbar label{display:grid;gap:4px}.toolbar input{width:auto}.toolbar p{margin-left:auto;padding:8px 0}
+.surface{background:white;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}tr:last-child td{border-bottom:0}
+thead{background:#f6effa}th{font-size:13px}.file-name,.file-detail{overflow-wrap:anywhere}.file-detail{font-size:12px;color:var(--muted);margin-top:3px}.size{white-space:nowrap}
+.chip{display:inline-block;background:var(--tonal);color:#493374;border-radius:20px;padding:3px 9px;font-size:12px;font-weight:600}.sent{display:block;color:var(--good);font-size:12px;margin-top:5px}
+.pagination{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:12px}
+.message{min-height:22px;color:var(--muted);font-size:14px}.message.error{color:var(--error)}.empty{padding:20px}
+dialog{width:min(620px,calc(100vw - 26px));max-height:calc(100dvh - 26px);overflow:auto;padding:22px;border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--ink)}
+dialog::backdrop{background:#221b30aa}.destination{display:grid;gap:12px;margin:16px 0}.destination label:not(.check){display:grid;gap:5px}.lookup{display:flex;gap:8px;align-items:end}.lookup label{flex:1}.lookup button{flex-shrink:0}.check{display:flex;align-items:center;gap:8px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-top:12px}#file-selected{overflow-wrap:anywhere}
+[hidden]{display:none!important}
+@media(max-width:650px){
+  main{padding:18px 13px 34px}.toolbar p{margin-left:0}.surface{background:transparent;border:0}
+  thead{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden;white-space:nowrap}
+  table,tbody{display:block}tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;background:white;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;padding:11px}
+  tbody td{border:0;padding:0;min-width:0}tbody td:first-child,tbody td:last-child{grid-column:1/-1}
+  tbody td:last-child{padding-top:3px}.pagination{justify-content:center}.empty-row{display:block}dialog{padding:16px}
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>File trong ngày</h1>
+  <p>File mới, vừa chuyển hoặc vừa cập nhật trong WIP &amp; Reference.</p>
+  <details class="account" id="account">
+    <summary id="account-summary">Tài khoản gửi ERP</summary>
+    <form id="credential">
+      <label>Username WordPress<input id="user" autocomplete="username" required maxlength="100"></label>
+      <label>Application Password<input id="password" type="password" autocomplete="off" required maxlength="128"></label>
+      <button type="submit">Kiểm tra và lưu</button>
+      <button type="button" class="secondary" id="cancel-account">Đóng</button>
+    </form>
+    <p>Tài khoản gắn file ERP được lưu riêng trên máy. Nếu chưa lưu riêng, DocSync dùng tài khoản đang có trong Workflows.</p>
+    <p id="account-message" class="message" role="status"></p>
+  </details>
+  <div class="toolbar">
+    <label for="date">Ngày<input id="date" type="date"></label>
+    <button type="button" class="secondary" id="refresh">Làm mới</button>
+    <p id="total"></p>
+  </div>
+  <p class="message" id="list-message" role="status">Đang đọc file…</p>
+  <div class="surface">
+    <table aria-label="Các file trong ngày">
+      <thead><tr><th scope="col">File</th><th scope="col">Phân loại</th><th scope="col">Thời gian</th><th scope="col">Dung lượng</th><th scope="col">Thao tác</th></tr></thead>
+      <tbody id="files"></tbody>
+    </table>
+  </div>
+  <div class="pagination" id="pagination" hidden>
+    <button type="button" class="secondary" id="previous">Trang trước</button><span id="page"></span>
+    <button type="button" class="secondary" id="next">Trang sau</button>
+  </div>
+</main>
+<dialog id="picker" aria-labelledby="picker-title">
+  <h2 id="picker-title">Gắn file vào ERP</h2>
+  <p id="file-selected"></p>
+  <form id="destination" class="destination">
+    <label>Loại bản ghi<select id="type" required></select></label>
+    <div class="lookup"><label for="query">Mã hoặc tên bản ghi<input id="query" maxlength="100"></label>
+      <button type="button" class="secondary" id="search">Tìm</button></div>
+    <label>Bản ghi<select id="record" required></select></label>
+    <label>Trường nhận file<select id="field" required></select></label>
+    <label class="check"><input id="ai" type="checkbox" disabled>Phân tích file và tạo Ghi chú AI</label>
+    <p id="ai-help" class="message"></p>
+    <p id="picker-message" class="message" role="status"></p>
+    <div class="actions">
+      <a id="record-link" href="#" hidden target="_blank" rel="noopener">Mở bản ghi ERP ↗</a>
+      <button type="button" class="secondary" id="close-picker">Đóng</button>
+      <button type="submit" id="attach" disabled>Gắn file lên ERP</button>
+    </div>
+  </form>
+</dialog>
+<script src="/assets/day.js"></script>
+</body>
+</html>

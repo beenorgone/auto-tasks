@@ -79,10 +79,13 @@ if "dashboard" in sys.argv:
         markup = APP.page("unit-test-token")
         self.assertIn("unit-test-token", markup)
         self.assertIn("Preview routing", markup)
-        self.assertIn("Refresh Kanban", markup)
-        self.assertIn("Open Kanban", markup)
+        self.assertIn("Cập nhật phân loại", markup)
+        self.assertNotIn("Open Kanban", markup)
         self.assertIn("Apply managed routes", markup)
         self.assertNotIn("confirm('Apply", markup)
+        app_markup = APP.add_app_tabs(markup.encode(), "/history").decode()
+        self.assertIn('href="/history" aria-current="page">Lịch sử hôm nay', app_markup)
+        self.assertNotIn('href="/kanban"', app_markup)
 
     def test_http_rejects_foreign_host_and_origin(self):
         server = APP.ThreadingHTTPServer(("127.0.0.1", 0), APP.AppHandler)

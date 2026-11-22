@@ -11,7 +11,11 @@ from zipfile import BadZipFile, ZipFile
 from docsync_intake import IntakeError
 
 
-PAYMENT_NAME = re.compile(r'bien_ban_doi_soat_s\d+_[a-z0-9-]+_\d{9,11}_\d+\.(csv|xlsx)', re.IGNORECASE | re.ASCII)
+# The organizer appends a SHA-256 when preserving a filename collision.
+PAYMENT_NAME = re.compile(
+    r'bien_ban_doi_soat_s\d+_[a-z0-9-]+_\d{9,11}_\d+(?:_[a-f0-9]{64})?\.(csv|xlsx)',
+    re.IGNORECASE | re.ASCII,
+)
 PAYMENT_COLUMNS = {'ma don hang', 'ma don hang shop', 'trang thai don hang', 'ngay hoan thanh', 'tien cod'}
 MAX_HEADER_ROWS = 96
 

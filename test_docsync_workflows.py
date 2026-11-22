@@ -187,6 +187,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(payload['carrier_mode'], 'draft_only')
         self.assertIn('xếp hàng dựng lô hóa đơn nháp', workflows.overview(self.root)['activity'][0]['outcome'])
 
+    def test_payment_collision_name_is_validated_and_sent_once(self):
+        self.enable()
+        self.allowed.add('eim_carrier_delivery')
+        workflows.set_enabled(self.root, workflows.CARRIER, True)
+        self.expected_type = 'carrier_delivery'
+        stem = 'bien_ban_doi_soat_S12_TA_1794856942_453'
+        suffix = '_' + 'a1' * 32
+        for extension in ('csv', 'xlsx'):
+            self.assertEqual(workflows.report_workflow(f'{stem}{suffix}.{extension}'), workflows.CARRIER)
+        for invalid in ('_copy', '_' + 'a' * 63, '_' + 'g' * 64, suffix + '_extra'):
+            self.assertIsNone(workflows.report_workflow(f'{stem}{invalid}.xlsx'))
+        valid_csv = 'STT,Mã đơn hàng,Mã đơn hàng shop,Trạng thái đơn hàng,Ngày hoàn thành,Tiền CoD\n'
+        file = self.ghtk / f'{stem}{suffix}.csv'
+        file.write_text(valid_csv, encoding='utf-8')
+        invalid = self.ghtk / f'{stem}{suffix}.xlsx'
+        invalid.write_bytes(workbook('BC Dòng tiền'))
+        for _ in range(3):
+            workflows.process_one(self.root)
+        self.assertEqual(self.uploaded, [(file.name, file.read_bytes())])
+        self.assertEqual({Path(item['path']).name: item['state'] for item in workflows.overview(self.root)['activity']},
+                         {file.name: 'done', invalid.name: 'review'})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -89,8 +89,7 @@ def list_day(root, key, date_text='', page=1):
     day = dt.date.fromisoformat(date_text) if date_text else dt.date.today()
     start = int(dt.datetime.combine(day, dt.time.min).timestamp()) * 1_000_000_000
     end = int(dt.datetime.combine(day + dt.timedelta(days=1), dt.time.min).timestamp()) * 1_000_000_000
-    rules_file = WIP.rules_path(root)
-    rules = WIP.migrate_rules(json.loads(rules_file.read_text(encoding='utf-8')))[0] if rules_file.is_file() else WIP.DEFAULT_RULES
+    rules = WIP.load_rules(root)
     labels = {category['id']: category['label'] for category in rules['categories']}
     files = [(relative, info) for relative, info in available_files(root, rules)
              if start <= max(info.st_mtime_ns, info.st_ctime_ns) < end]
@@ -105,7 +104,8 @@ def list_day(root, key, date_text='', page=1):
     rows = []
     for relative, info in selection:
         old = indexed.get(str(relative))
-        if old and old['modified_at'] == info.st_mtime_ns and old['byte_size'] == info.st_size:
+        if (old and old['modified_at'] == info.st_mtime_ns and old['byte_size'] == info.st_size
+                and old['classification_reason'].startswith('manual review:')):
             category = old['category']
         else:
             category, *_ = WIP.classify(relative, rules, root / relative)

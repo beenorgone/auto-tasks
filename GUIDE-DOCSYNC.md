@@ -322,6 +322,7 @@ Mở <http://127.0.0.1:8787> trên máy chạy DocSync.
 | System health · Intake | Xem watcher, lịch chạy, số lượng hồ sơ và việc tiếp theo |
 
 Thông tin sức khỏe và hàng đợi trên **Tổng quan** được làm mới theo chu kỳ 30 giây.
+Chọn **Tiếng Việt** hoặc **English** ở đầu trang để đổi ngôn ngữ Tổng quan.
 
 Trong **Lịch sử hôm nay**, nhập **xem trước** (hoặc `docsync preview`) để xem đề xuất,
 hay **phân loại** (hoặc `docsync apply`) để áp dụng quy tắc hiện hành và chuyển các file đủ điều kiện.
@@ -334,10 +335,32 @@ nhóm công việc như trên bot Telegram, kiểm tra thư mục đích rồi b
 Chọn **Giữ lại** để DocSync bỏ qua đúng bản file đó trong các lượt tự động.
 File ZIP hồ sơ PO tiếp tục dùng quy trình chọn **Trong nước** hoặc **Nhập khẩu** riêng.
 
+Trong **File trong ngày** hoặc **Lịch sử hôm nay**, chọn các file cần xử lý và chọn
+**Phân loại**, **Giữ lại**, **Đổi tên** hoặc **Xóa file** rồi bấm **Tiếp tục**. Đổi tên
+nhận một tên đầy đủ cho mỗi file. Xóa đưa file vào `.docsync/Trash` trong WIP.
+Nhật ký phân loại hiển thị đích đổi tên hoặc vị trí trong thùng rác để tìm lại.
+
 Trong **Cài đặt**, nhập đường dẫn của thư mục đã tồn tại rồi bấm **Lưu thư mục**.
 Hai ô quét bổ sung có thể để trống. App, CLI và watcher dùng giá trị đã lưu
 từ lượt tiếp theo. Mỗi gốc WIP có chỉ mục và công tắc workflow riêng.
 Biến môi trường đặt sẵn cho dịch vụ hoặc terminal được ưu tiên và hiện chỉ đọc trên web.
+
+Trong **Cài đặt → Quy tắc phân loại và chuyển file → Biểu mẫu**, mở quy tắc để
+chỉnh đích, từ khóa, cách xử lý hoặc bật/tắt. Dùng **Lên / Xuống** để đổi thứ tự,
+rồi bấm **Lưu quy tắc**. Chế độ **JSON** và CLI dùng cùng cấu hình `.wip/rules.json`.
+User script xuất cấu hình, chỉnh bằng công cụ JSON rồi nhập lại:
+
+```sh
+docsync rules --export > rules.json
+# Chỉnh rules.json bằng user script hoặc trình soạn thảo.
+docsync rules --import rules.json
+docsync preview
+```
+
+Dùng `docsync rules --import -` để nhận JSON qua stdin. Thứ tự trong `categories`
+là thứ tự thử mẫu, `enabled: false` tắt một quy tắc. Đích tự động nằm trong nhóm
+công việc của WIP. Mặc định giữ **Giao vận/GHTK** cho báo cáo GHTK để watcher
+EIM theo dõi đúng thư mục. Xử lý hóa đơn, UNC và hồ sơ PO ZIP có luồng chuyên biệt.
 
 ## 6. Tự động chạy và khóa chống trùng
 

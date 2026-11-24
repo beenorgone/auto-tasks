@@ -1,8 +1,10 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("wip_organizer", Path(__file__).with_name("wip-organizer.py"))
@@ -111,6 +113,32 @@ class WipOrganizerTests(unittest.TestCase):
             self.assertEqual("Kế toán - tài chính/VAT", targets["vat"])
             self.assertEqual("Kế toán - tài chính/Sao kê", targets["bank_statements"])
             self.assertEqual("Custom sales target", targets["commerce"])
+
+    def test_settings_control_custom_moves_and_reject_stale_updates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'wip'
+            root.mkdir()
+            state = Path(temporary) / 'state'
+            with patch.dict(os.environ, {'STATE_DIR': str(state)}):
+                options = WIP.load_rules(root)
+                revision = WIP.rules_revision(options)
+                options['categories'].insert(0, {
+                    'id': 'sample', 'label': 'Sample', 'patterns': ['^fixture'],
+                    'confidence': .95, 'target': 'QC/Bộ kiểm thử', 'route_mode': 'managed_move',
+                })
+                WIP.save_rules(root, options, revision)
+                self.assertEqual('managed_move', WIP.classify(Path('fixture.pdf'), WIP.load_rules(root))[4])
+                self.assertEqual(0, WIP.main([
+                    '--year-root', str(root), 'check-target', '--target', 'QC/Bộ kiểm thử',
+                ]))
+                with self.assertRaises(WIP.RulesConflict):
+                    WIP.save_rules(root, options, revision)
+                options['categories'][0]['target'] = '../outside'
+                with self.assertRaises(ValueError):
+                    WIP.save_rules(root, options)
+                options['categories'][0].update(target='QC/Bộ kiểm thử', enabled=False)
+                WIP.save_rules(root, options)
+                self.assertEqual('needs_review', WIP.classify(Path('fixture.pdf'), WIP.load_rules(root))[0])
 
     def test_scan_is_index_only_and_dashboard_is_generated(self):
         with tempfile.TemporaryDirectory() as temporary:

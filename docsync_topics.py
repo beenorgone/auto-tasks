@@ -1,6 +1,7 @@
 """Work-topic proposals with immutable, audited file/folder decisions."""
 import hashlib
 import fcntl
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -48,35 +49,51 @@ def save_records(state, records):
             temporary.unlink(missing_ok=True)
 
 
-def resolve_file(root, state, relative, choice, verify):
-    """Apply a local decision using the same allow-list, audit and lock as Telegram."""
-    if not isinstance(choice, str) or choice not in (*TOPICS, HOLD):
-        raise ValueError('Chọn một nhóm phân loại hoặc Giữ lại.')
+@contextmanager
+def organizer_lock(state):
     state.mkdir(parents=True, exist_ok=True)
     with (state / 'organizer.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        path = review_file(root, relative)
-        verify(path)
+        yield
+
+
+def resolve_file(root, state, relative, choice, verify):
+    """Apply a local decision using the same allow-list, audit and lock as Telegram."""
+    return resolve_files(root, state, [relative], choice, lambda _, path: verify(path))[relative]
+
+
+def resolve_files(root, state, relatives, choice, verify):
+    """Validate every selected file before applying one audited move plan."""
+    if not isinstance(choice, str) or choice not in (*TOPICS, HOLD):
+        raise ValueError('Chọn một nhóm phân loại hoặc Giữ lại.')
+    with organizer_lock(state):
         records = read_records(state)
-        checksum = fingerprint(path)
-        verify(path)
-        existing = records.get(relative, {})
-        if existing.get('sha256') != checksum:
-            existing = {}
-        if existing.get('status', '').startswith('wordquest_'):
-            raise ValueError('File này đang thuộc luồng WordQuest.')
-        record = {**existing, 'sha256': checksum, 'signature': metadata_key(path), 'topic': choice,
-                  'workspace': str(root), 'origin': 'web', 'notified': True,
-                  'decided': time.time(), 'created': existing.get('created', time.time())}
-        destination = ''
-        if choice != HOLD:
-            destination = (Path(TOPICS[choice]) / path.name).as_posix()
-            apply_routes(root, state, {relative: destination}, locked=True,
-                         expected_hashes={relative: checksum})
-        record.update(status='completed' if destination else 'held', destination=destination)
-        records[relative] = record
+        routes, hashes, results = {}, {}, {}
+        for relative in relatives:
+            path = review_file(root, relative)
+            verify(relative, path)
+            checksum = fingerprint(path)
+            verify(relative, path)
+            existing = records.get(relative, {})
+            if existing.get('sha256') != checksum:
+                existing = {}
+            if existing.get('status', '').startswith('wordquest_'):
+                raise ValueError('File này đang thuộc luồng WordQuest.')
+            destination = (Path(TOPICS[choice]) / path.name).as_posix() if choice != HOLD else ''
+            if destination:
+                routes[relative] = destination
+                hashes[relative] = checksum
+            results[relative] = destination
+            records[relative] = {
+                **existing, 'sha256': checksum, 'signature': metadata_key(path), 'topic': choice,
+                'workspace': str(root), 'origin': 'web', 'notified': True,
+                'decided': time.time(), 'created': existing.get('created', time.time()),
+                'status': 'completed' if destination else 'held', 'destination': destination,
+            }
+        if routes:
+            apply_routes(root, state, routes, locked=True, expected_hashes=hashes)
         save_records(state, records)
-        return destination
+    return results
 
 
 def is_held_file(root, state, source, sha):
@@ -136,7 +153,8 @@ def fingerprint(path):
 def candidates(root, wip, records=None):
     """Only direct work intake and leftover legacy branches; never personal archives."""
     root = Path(root)
-    rules = wip.migrate_rules(json.loads(wip.rules_path(root).read_text()))[0] if wip.rules_path(root).exists() else wip.DEFAULT_RULES
+    rules = wip.load_rules(root)
+    active = {item['id']: item for item in wip.active_categories(rules)}
     manual = {}
     database = wip.db_path(root)
     if database.exists():
@@ -161,16 +179,19 @@ def candidates(root, wip, records=None):
         if DOSSIER_ZIP.fullmatch(source.name):
             continue  # Purchase grouping keeps its own stronger contract.
         relative = source.relative_to(root).as_posix()
+        if wip.is_excluded(Path(relative), rules) or wip.is_generated(source, rules):
+            continue
         category, confidence, reason, target, mode = wip.classify(Path(relative), rules, source if source.is_file() else None)
         topic = next((name for name in TOPICS.values() if target and within(target, name)), None)
         # More than one matching work topic is a human decision, even when the
         # first-match classifier would pick a high-confidence rule.
         matches = set()
-        for rule in rules['categories']:
+        for rule in active.values():
             if any(re.search(pattern, wip.normalized(source.name), re.I) for pattern in rule['patterns']):
                 match = next((name for name in TOPICS.values() if within(rule['target'], name)), None)
                 if match: matches.add(match)
-        automatic = topic and confidence >= .93 and len(matches) <= 1
+        configured_mode = active.get(category, {}).get('route_mode')
+        automatic = topic and configured_mode != 'review_only' and confidence >= .93 and len(matches) <= 1
         destination = (Path(target) / source.name).as_posix() if topic else None
         stage = 'ready' if automatic else 'needs_review'
         old = manual.get(relative)

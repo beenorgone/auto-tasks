@@ -93,6 +93,7 @@ form.addEventListener('submit', async event => {
 });
 
 refreshStatus();
+setupDocSyncFileActions(document.querySelector('#history-rows'), form.dataset.token, refreshHistory);
 
 document.querySelector('#history-rows').addEventListener('click', event => {
     const rowButton = event.target.closest('.classify-file');

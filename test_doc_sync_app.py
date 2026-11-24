@@ -80,14 +80,19 @@ if "dashboard" in sys.argv:
     def test_page_contains_csrf_token_and_workflow(self):
         markup = APP.page("unit-test-token")
         self.assertIn("unit-test-token", markup)
-        self.assertIn("Preview routing", markup)
+        self.assertIn("<html lang='vi'>", markup)
+        self.assertIn(">Xem trước</button>", markup)
         self.assertIn("Cập nhật phân loại", markup)
         self.assertNotIn("Open Kanban", markup)
-        self.assertIn("Apply managed routes", markup)
+        self.assertIn(">Áp dụng thay đổi</button>", markup)
         self.assertNotIn("confirm('Apply", markup)
         app_markup = APP.add_app_tabs(markup.encode(), "/history").decode()
         self.assertIn('href="/history" aria-current="page">Lịch sử hôm nay', app_markup)
         self.assertNotIn('href="/kanban"', app_markup)
+        english = APP.page("unit-test-token", "en")
+        self.assertIn("<html lang='en'>", english)
+        self.assertIn(">Refresh classification</button>", english)
+        self.assertIn(">Apply changes</button>", english)
 
     def test_http_rejects_foreign_host_and_origin(self):
         server = APP.ThreadingHTTPServer(("127.0.0.1", 0), APP.AppHandler)

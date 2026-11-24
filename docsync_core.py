@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 import docsync_purchase as PURCHASE
 import docsync_topics as TOPIC_ROUTER
-from docsync_layout import is_filed_report, is_intake, approved_target
+from docsync_layout import is_intake, approved_target, within
 from docsync_paths import state_directory, work_root
 
 ROOT = Path(__file__).resolve().parent
@@ -28,8 +28,8 @@ def board(year_root: Path) -> dict:
     topic_cards = (TOPIC_ROUTER.cards(year_root, WIP, state_directory())
                    if year_root.resolve() == work_root().resolve() else [])
     topic_paths = {card['path'] for card in topic_cards}
-    rule_file = WIP.rules_path(year_root)
-    rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
+    rules = WIP.load_rules(year_root)
+    managed_targets = {item['target'] for item in WIP.active_categories(rules) if item.get('route_mode') == 'managed_move'}
     records = {}
     database = WIP.db_path(year_root)
     if database.exists():
@@ -59,9 +59,9 @@ def board(year_root: Path) -> dict:
             mode = 'review_only'  # Manual target decisions never bypass the routing allow-list.
         if status in ('filed', 'archived', 'in_progress', 'waiting_external'):
             stage = status
-        elif is_filed_report(relative):
+        elif any(within(relative, folder) for folder in managed_targets):
             stage = 'filed'
-        elif mode == 'managed_move' and is_intake(relative) and approved_target(year_root, target):
+        elif mode == 'managed_move' and is_intake(relative) and approved_target(year_root, target, configured=True):
             stage = 'ready'
         else:
             stage = 'needs_review'

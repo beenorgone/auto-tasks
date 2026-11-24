@@ -11,7 +11,9 @@ import time
 
 from docsync_layout import CATEGORY_TARGETS, TOPICS
 from docsync_paths import state_directory
+from docsync_core import WIP
 from docsync_daily import automatic_state, file_token
+from docsync_file_actions import audit_file, selection_for
 import docsync_topics as topics
 import docsync_workflows as workflows
 
@@ -71,12 +73,31 @@ def topic_events(root, records, day):
                record['topic'], True if destination else None)
 
 
+def file_action_events(root, day):
+    journal = audit_file(root, day)
+    if not journal.is_file():
+        return
+    with journal.open(encoding='utf-8') as stream:
+        for line in stream:
+            try:
+                row = json.loads(line)
+                if row['status'] != 'completed' or row['action'] not in ('rename', 'trash'):
+                    continue
+                at = dt.datetime.fromisoformat(row['time']).astimezone()
+                if at.date() == day:
+                    yield (at.strftime('%H:%M:%S'), str(root / row['source']), str(root / row['destination']),
+                           '', row['action'])
+            except (ValueError, TypeError, KeyError):
+                continue
+
+
 def list_today(state, day, *, root=None, records=None):
     """Keep the last recorded classification per source, including manual-review outcomes."""
     latest = {}
     sources = [organizer_events(state, day), purchase_events(state, day)]
     if root is not None:
         sources.append(topic_events(root, records if records is not None else topics.read_records(state), day))
+        sources.append(file_action_events(root, day))
     for events in sources:
         for row in events:
             at, source, _, _, _ = row
@@ -108,7 +129,7 @@ def decide(root, state, key, payload):
     if not isinstance(token, str) or not re.fullmatch(r'[a-f0-9]{64}', token):
         raise ValueError('Làm mới lịch sử rồi chọn lại file.')
     path = topics.review_file(root, relative)
-    if not any(source == str(path) and moved is not True
+    if not any(source == str(path) and moved in (False, None)
                for _, source, _, _, moved in list_today(state, dt.date.today(), root=root)[:MAX_ROWS]):
         raise ValueError('File không còn chờ duyệt trong lịch sử hôm nay.')
 
@@ -128,18 +149,28 @@ def render_today(root, template, *, day=None, state=None, key=None):
     state = state or state_directory()
     records = topics.read_records(state)
     history = list_today(state, current, root=root, records=records)
+    labels = {item['id']: item['label'] for item in WIP.load_rules(root)['categories']}
     table_rows = []
+    selected_paths = set()
     for at, source, destination, category, moved in history[:MAX_ROWS]:
-        group = TOPICS.get(category, CATEGORY_TARGETS.get(category, category))
+        group = TOPICS.get(category, CATEGORY_TARGETS.get(category, labels.get(category, category)))
         if category in ('needs_review', topics.HOLD):
             group = ''
         location = Path(destination) if destination else None
         if location and location.is_absolute() and location.is_relative_to(root):
             location = location.relative_to(root)
-        status = {True: 'Đã chuyển', False: 'Chờ duyệt', None: 'Giữ lại'}[moved]
-        action = review_button(root, source, key, records) if moved is not True else ''
+        status = {True: 'Đã chuyển', False: 'Chờ duyệt', None: 'Giữ lại',
+                  'rename': 'Đã đổi tên', 'trash': 'Đã đưa vào thùng rác'}[moved]
+        action = review_button(root, source, key, records) if moved in (False, None) else ''
+        current_path = Path(destination) if moved in (True, 'rename') and destination else Path(source)
+        selectable = selection_for(root, key, current_path) if moved != 'trash' else None
+        checkbox = ''
+        if selectable and selectable['path'] not in selected_paths:
+            selected_paths.add(selectable['path'])
+            checkbox = ('<input type="checkbox" data-file-select aria-label="Chọn ' + escape(selectable['name'])
+                        + '" data-file="' + escape(json.dumps(selectable, ensure_ascii=False)) + '"> ')
         table_rows.append(
-            f'<tr><td>{escape(at[:5])}</td><td><strong>{escape(Path(source).name)}</strong>'
+            f'<tr><td>{escape(at[:5])}</td><td>{checkbox}<strong>{escape(Path(source).name)}</strong>'
             f'<small>{escape(source)}</small></td><td>{escape(group or "Chưa rõ")}</td>'
             f'<td>{escape(str(location) if location else "—")}</td>'
             f'<td><span class="chip {"moved" if moved else "review"}">{status}</span></td><td>{action}</td></tr>'
@@ -150,6 +181,9 @@ def render_today(root, template, *, day=None, state=None, key=None):
     summary = f'{counts[True]} đã chuyển · {counts[False]} chờ duyệt'
     if counts[None]:
         summary += f' · {counts[None]} giữ lại'
+    for action, label in (('rename', 'đã đổi tên'), ('trash', 'đã đưa vào thùng rác')):
+        if counts[action]:
+            summary += f' · {counts[action]} {label}'
     if len(history) > MAX_ROWS:
         summary += f' · Hiện {MAX_ROWS} mục gần nhất'
     options = ''.join(f'<option value="{choice}">{escape(label)}</option>' for choice, label in TOPICS.items())

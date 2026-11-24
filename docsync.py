@@ -25,7 +25,10 @@ def main(argv=None):
             p.add_argument('--stage', choices=STAGES)
             p.add_argument('--limit', type=int, default=8, help='cards per column; 0 shows all')
     sub.add_parser('scan')
-    sub.add_parser('rules')
+    rules = sub.add_parser('rules', help='view, export or update folder classification settings')
+    rule_action = rules.add_mutually_exclusive_group()
+    rule_action.add_argument('--export', action='store_true', help='print editable JSON')
+    rule_action.add_argument('--import', dest='rule_input', help='save JSON from a file or - for stdin')
     sub.add_parser('preview')
     apply = sub.add_parser('apply')
     apply.add_argument('--sync-project', action='store_true', help='also run external rclone sync')
@@ -57,10 +60,20 @@ def main(argv=None):
         WIP.dashboard(root)
         print('Next: docsync board')
     elif command == 'rules':
-        rule_file = WIP.rules_path(root)
-        rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
+        if args.rule_input:
+            raw = sys.stdin.read(262145) if args.rule_input == '-' else Path(args.rule_input).read_text(encoding='utf-8')
+            if len(raw.encode()) > 262144:
+                raise ValueError('File quy tắc vượt giới hạn 256 KiB.')
+            WIP.save_rules(root, json.loads(raw))
+            print(f'Đã lưu quy tắc tại {WIP.rules_path(root)}.')
+            return 0
+        rules = WIP.load_rules(root)
+        if args.export:
+            print(json.dumps(rules, ensure_ascii=False, indent=2))
+            return 0
         for rule in rules['categories']:
-            print(f"{rule['id']}: {rule['label']} | {rule.get('route_mode', 'review_only')} → {rule['target']}")
+            mode = rule.get('route_mode') or 'topic_auto'
+            print(f"{rule['id']}: {rule['label']} | {mode if rule.get('enabled', True) else 'disabled'} → {rule['target']}")
         print(f'{PURCHASE.RULE}: {PURCHASE.RULE_DESCRIPTION} | managed_move | {PURCHASE.purchase_root()}')
         print('Next: docsync review <dossier> <category> --note <reason>')
     elif command == 'scan':

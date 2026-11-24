@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import fcntl
 import hashlib
 import html
 import json
@@ -25,7 +26,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
-from docsync_paths import work_root
+from docsync_paths import state_directory, work_root
 from docsync_layout import (CATEGORY_TARGETS, REPORT_TARGETS, DIRECTORIES, SCOPES, LEGACY_SCOPES,
                             OLD_TARGETS, FOLDER_CATEGORIES, B2B_PRICES, B2B_RECONCILIATION,
                             within, approved_target, safe_directory)
@@ -273,20 +274,100 @@ def normalized(value: str) -> str:
     return unicodedata.normalize("NFC", value).replace("đ", "d").replace("Đ", "D").casefold()
 
 
-def load_rules(year_root: Path) -> dict:
-    rule_file = rules_path(year_root)
-    with rule_file.open(encoding="utf-8") as handle:
-        rules, changed = migrate_rules(json.load(handle))
-    if changed:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=rule_file.parent, prefix=".rules-", delete=False) as handle:
+def load_rules(root: Path) -> dict:
+    """Read effective rules without writing or initializing a workspace."""
+    path = rules_path(root)
+    return migrate_rules(json.loads(path.read_text(encoding='utf-8')))[0] if path.exists() else copy.deepcopy(DEFAULT_RULES)
+
+
+def rules_revision(rules):
+    return hashlib.sha256(json.dumps(rules, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def validate_rules(root, rules):
+    """Check rule fields and automatic destinations before saving."""
+    if not isinstance(rules, dict) or rules.get('version') != DEFAULT_RULES['version']:
+        raise ValueError('Dùng bản JSON xuất từ DocSync để chỉnh quy tắc.')
+
+    def strings(items, name, regex=False):
+        if (not isinstance(items, list) or len(items) > 60
+                or any(not isinstance(item, str) or not item.strip() or len(item) > 400
+                       or any(ord(char) < 32 for char in item) for item in items)):
+            raise ValueError(f'{name}: nhập tối đa 60 mẫu, mỗi mẫu dài tối đa 400 ký tự.')
+        if regex:
+            for item in items:
+                try:
+                    re.compile(item, re.I)
+                except (re.error, OverflowError, RecursionError) as error:
+                    raise ValueError(f'{name}: regex không hợp lệ ({error}).') from error
+
+    strings(rules.get('excluded_paths'), 'Thư mục bỏ qua')
+    strings(rules.get('generated_name_patterns'), 'File tự sinh', regex=True)
+    categories = rules.get('categories')
+    if not isinstance(categories, list) or len(categories) > 80:
+        raise ValueError('Cần một danh sách tối đa 80 quy tắc.')
+    ids = set()
+    for item in categories:
+        category = item.get('id') if isinstance(item, dict) else None
+        if not isinstance(category, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', category) or category in ids:
+            raise ValueError('Mã quy tắc phải duy nhất, bắt đầu bằng chữ thường và chỉ dùng a-z, 0-9 hoặc _.')
+        ids.add(category)
+        label, target = item.get('label'), item.get('target')
+        if (not isinstance(label, str) or not label.strip() or len(label) > 120
+                or any(ord(char) < 32 for char in label)):
+            raise ValueError(f'{category}: tên nhóm không hợp lệ.')
+        if (not isinstance(target, str) or not target.strip() or len(target) > 300
+                or any(ord(char) < 32 for char in target) or Path(target).as_posix() != target
+                or Path(target).is_absolute() or '..' in Path(target).parts or target == '.'):
+            raise ValueError(f'{category}: đích phải là thư mục tương đối trong WIP.')
+        confidence = item.get('confidence')
+        if type(confidence) not in (float, int) or not 0 <= confidence <= 1:
+            raise ValueError(f'{category}: độ tin cậy phải từ 0 đến 1.')
+        strings(item.get('patterns'), category, regex=True)
+        if type(item.get('enabled', True)) is not bool:
+            raise ValueError(f'{category}: enabled phải là true hoặc false.')
+        mode = item.get('route_mode')
+        if mode not in (None, 'review_only', 'managed_move', 'topic_auto'):
+            raise ValueError(f'{category}: chế độ di chuyển không hợp lệ.')
+        if category == 'ghtk_reports' and target != REPORT_TARGETS[category]:
+            raise ValueError(f'{category}: dùng đích {REPORT_TARGETS[category]} để watcher EIM tìm thấy file.')
+        if mode in ('managed_move', 'topic_auto') and not approved_target(root, target, configured=True):
+            raise ValueError(f'{category}: đích tự động phải nằm trong một nhóm công việc và không đi qua liên kết mềm.')
+    if 'bank_statements' not in ids:
+        raise ValueError('Giữ quy tắc bank_statements trong danh sách và tắt bằng enabled: false nếu cần.')
+
+
+class RulesConflict(ValueError):
+    """Another editor saved a newer revision."""
+
+
+def save_rules(root: Path, rules, revision=None):
+    """Save a revision atomically under the organizer lock."""
+    if not root.is_dir():
+        raise ValueError('Thư mục WIP không tồn tại.')
+    state = state_directory()
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / 'organizer.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if revision is not None and revision != rules_revision(load_rules(root)):
+            raise RulesConflict('Quy tắc vừa thay đổi. Tải lại trước khi lưu.')
+        validate_rules(root, rules)
+        path = safe_directory(root, '.wip/rules.json')
+        path.parent.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as handle:
             temporary = Path(handle.name)
             try:
-                handle.write(json.dumps(rules, ensure_ascii=False, indent=2) + "\n")
+                json.dump(rules, handle, ensure_ascii=False, indent=2)
+                handle.write('\n')
                 handle.flush()
-                os.replace(temporary, rule_file)
+                os.fsync(handle.fileno())
+                os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
-    return rules
+
+
+def active_categories(rules):
+    return [item for item in rules['categories'] if item.get('enabled', True)]
 
 
 def is_generated(path: Path, rules: dict) -> bool:
@@ -344,22 +425,23 @@ def bank_evidence(source: Path | None) -> tuple[bool, str]:
 
 def classify(relative: Path, rules: dict, source: Path | None = None) -> tuple[str, float, str, str | None, str]:
     text = normalized(relative.as_posix())
-    categories = {item["id"]: item for item in rules["categories"]}
+    categories = {item["id"]: item for item in active_categories(rules)}
     # Explicit filing location wins over incidental words in the filename.
-    for folder, category_id in sorted(FOLDER_CATEGORIES.items(), key=lambda item: len(item[0]), reverse=True):
+    folders = {**FOLDER_CATEGORIES, **{category['target']: category['id'] for category in reversed(tuple(categories.values()))}}
+    for folder, category_id in sorted(folders.items(), key=lambda item: len(item[0]), reverse=True):
         if within(relative.as_posix(), folder) and category_id in categories:
             category = categories[category_id]
             mode = category.get("route_mode", "review_only") if folder in REPORT_TARGETS.values() else "review_only"
             return category_id, float(category["confidence"]), f"folder: {folder}", folder, mode
-    if re.search(r"\bb2b\b", text):
+    if 'commerce' in categories and re.search(r"\bb2b\b", text):
         if re.search(r"b[aả]ng gi[aá]", text):
             return "commerce", 0.94, "B2B price list; review required", B2B_PRICES, "review_only"
         if re.search(r"(?:d[oố]i so[aá]t|c[oô]ng n[oợ])", text):
             return "commerce", 0.94, "B2B reconciliation; review required", B2B_RECONCILIATION, "review_only"
-    for category in rules["categories"]:
+    for category in categories.values():
         matched = [pattern for pattern in category["patterns"] if re.search(pattern, text, re.I)]
         if matched:
-            route_mode = category.get("route_mode", "review_only")
+            route_mode = 'managed_move' if category.get('route_mode') == 'managed_move' else 'review_only'
             if category["id"] == "bank_statements" and re.match(r"(?:danh sach giao dich|lich-su-giao-dich)", normalized(relative.name)):
                 valid, detail = bank_evidence(source)
                 if not valid:
@@ -518,11 +600,14 @@ def review_dossier(year_root: Path, dossier_id: str, category: str, target: str 
         conn.execute("INSERT INTO events(created_at, event_type, subject, detail) VALUES (?, 'manual_review', ?, ?)", (now, dossier_id, detail))
 
 
-def route_file(rules_file: Path, relative_path: str, source: Path | None = None) -> tuple[str, float, str | None, str, str]:
+def route_file(rules_file: Path, relative_path: str, source: Path | None = None, *, scope: Path | None = None) -> tuple[str, float, str | None, str, str]:
     """Classify a single path against an explicit rules file; makes no file changes."""
     with rules_file.open(encoding="utf-8") as handle:
-        rules = json.load(handle)
-    category, confidence, reason, target, route_mode = classify(Path(relative_path), rules, source)
+        rules = migrate_rules(json.load(handle))[0]
+    relative = Path(relative_path)
+    if is_excluded(scope or relative, rules) or is_generated(relative, rules):
+        return 'needs_review', 0, None, 'review_only', 'excluded by settings'
+    category, confidence, reason, target, route_mode = classify(relative, rules, source)
     return category, confidence, target, route_mode, reason
 
 
@@ -646,9 +731,13 @@ ROUTE_NOT_APPROVED = 3
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "check-target":
-        return 0 if approved_target(args.year_root, args.target) else ROUTE_NOT_APPROVED
+        rules = load_rules(args.year_root)
+        allowed = any(item['target'] == args.target and item.get('route_mode') == 'managed_move'
+                      for item in active_categories(rules))
+        return 0 if allowed and approved_target(args.year_root, args.target, configured=True) else ROUTE_NOT_APPROVED
     if args.command == "route":
-        category, confidence, target, route_mode, reason = route_file(args.rules, args.path, args.source)
+        scope = args.source.relative_to(args.year_root) if args.source and args.source.is_relative_to(args.year_root) else None
+        category, confidence, target, route_mode, reason = route_file(args.rules, args.path, args.source, scope=scope)
         print("\t".join([category, f"{confidence:g}", target or "", route_mode, reason]))
         return 0 if (route_mode == "managed_move" and target) else ROUTE_NOT_APPROVED
     year_root = args.year_root.resolve()

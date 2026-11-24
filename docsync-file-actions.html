@@ -1,0 +1,39 @@
+<style>
+.file-bulk{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.file-bulk label{display:flex;align-items:center;gap:6px;font-weight:600}.file-bulk select{width:auto}
+.file-bulk select,.bulk-dialog input,.bulk-dialog select{border:1px solid #81748b;padding:8px 10px;border-radius:9px;font:inherit;background:#fff;color:#201d26}
+.file-bulk button,.bulk-dialog button{border:0;border-radius:20px;background:#6750a4;color:#fff;padding:8px 13px;font:600 14px Roboto,Arial,sans-serif;cursor:pointer}
+.bulk-dialog .secondary{background:#e8def8;color:#392460}.file-bulk button:disabled,.bulk-dialog button:disabled{opacity:.55}
+.bulk-dialog{width:min(580px,calc(100% - 24px));max-height:86vh;overflow:auto;padding:20px;border:1px solid #e7dfea;border-radius:17px;background:#fffbfe;color:#201d26}
+.bulk-dialog::backdrop{background:#201d2680}.bulk-dialog h2{margin:0}.bulk-dialog p{margin:5px 0 12px;color:#5f5966}
+.bulk-dialog label{display:grid;gap:4px;overflow-wrap:anywhere}.bulk-dialog .bulk-list{margin:10px 0;padding-left:20px;overflow-wrap:anywhere}
+.bulk-dialog .bulk-list li{margin:7px 0}.bulk-dialog footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+[data-file-select]{accent-color:#6750a4;margin-right:6px}.bulk-feedback{margin:0 0 10px;overflow-wrap:anywhere}.bulk-feedback:empty{display:none}
+#bulk-errors,#bulk-result[data-error]{color:#8c1d18}.file-bulk [aria-live]{min-width:105px}
+</style>
+<div class="file-bulk" id="file-bulk" data-limit="__BULK_LIMIT__">
+  <label><input id="bulk-all" type="checkbox">Chọn trang này</label>
+  <span id="bulk-count" aria-live="polite">0 file</span>
+  <select id="bulk-action" aria-label="Thao tác cho file đã chọn">
+    <option value="">Chọn thao tác</option>
+    <option value="classify">Phân loại</option>
+    <option value="hold">Giữ lại</option>
+    <option value="rename">Đổi tên</option>
+    <option value="trash">Xóa file</option>
+  </select>
+  <button type="button" id="bulk-open" disabled>Tiếp tục</button>
+  <small>Tối đa __BULK_LIMIT__ file mỗi lượt</small>
+</div>
+<p id="bulk-result" class="bulk-feedback" role="status"></p>
+<dialog class="bulk-dialog" id="bulk-dialog" aria-labelledby="bulk-title">
+  <form id="bulk-form">
+    <h2 id="bulk-title"></h2>
+    <p id="bulk-note"></p>
+    <label id="bulk-topic-label" hidden>Nhóm nhận file<select id="bulk-topic" disabled>
+      <option value="">Chọn nhóm</option>__BULK_TOPICS__
+    </select></label>
+    <ol id="bulk-list" class="bulk-list"></ol>
+    <p id="bulk-errors" role="status"></p>
+    <footer><button type="button" class="secondary" id="bulk-cancel">Hủy</button><button type="submit" id="bulk-submit"></button></footer>
+  </form>
+</dialog>

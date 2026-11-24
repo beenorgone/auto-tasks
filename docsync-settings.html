@@ -13,6 +13,15 @@ input[readonly]{background:#eee8f0}small{display:block;color:#5f5966;font-size:1
 button{min-height:42px;border:0;border-radius:22px;background:#6750a4;color:#fff;font:inherit;font-weight:650;padding:8px 17px;cursor:pointer}
 button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #6750a4;outline-offset:3px}
 .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:17px}#feedback{margin:0;color:#205e37}#feedback[data-error]{color:#8c1d18}
+.rules{margin-top:24px;max-width:860px}.rules h2{margin-bottom:8px}.rules textarea{width:100%;min-height:310px;resize:vertical;padding:12px;border:1px solid #81748b;border-radius:9px;font:13px/1.5 monospace}
+.rules button.secondary{background:#e8def8;color:#392460}#rules-feedback[data-error]{color:#8c1d18}
+.rule-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.rule-toolbar button[aria-pressed=true]{background:#6750a4;color:#fff}
+.rule-card{background:#fffbfe;border:1px solid #e7dfea;border-radius:12px;margin:8px 0;padding:12px}
+.rule-card summary{cursor:pointer;font-weight:700;overflow-wrap:anywhere}.rule-card summary small{display:inline;margin-left:5px;font-weight:400}
+.rule-card input[type=checkbox]{display:inline;width:auto;margin-right:6px}.rule-card textarea,#rule-filters textarea{min-height:76px}
+.rule-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px 14px;margin:10px 0}
+.rule-card select{width:100%;border:1px solid #81748b;border-radius:8px;padding:8px;font:inherit;background:#fff;color:inherit}
+.rule-keyword{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.rule-keyword label{flex:1 1 200px}
 @media(max-width:560px){main{padding:22px 13px}form{padding:14px}}
 </style></head><body><main>
 <h1>Cài đặt thư mục</h1>
@@ -31,5 +40,59 @@ button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #675
   </fieldset>
   <div class="actions" aria-live="polite"><p id="feedback" role="status"></p></div>
 </form>
+<section class="rules" aria-labelledby="rules-title">
+  <h2 id="rules-title">Quy tắc phân loại và chuyển file</h2>
+  <form id="rule-settings">
+    <fieldset disabled>
+      <div class="rule-toolbar" role="group" aria-label="Cách chỉnh quy tắc">
+        <button type="button" class="secondary" id="rules-visual-button" aria-pressed="true" aria-controls="rules-visual">Biểu mẫu</button>
+        <button type="button" class="secondary" id="rules-json-button" aria-pressed="false" aria-controls="rules-json">JSON</button>
+      </div>
+      <fieldset id="rules-visual">
+        <small>DocSync thử từng quy tắc từ trên xuống. Mở một quy tắc để chỉnh hoặc dùng nút Lên, Xuống để đổi thứ tự.</small>
+        <div id="rule-cards"></div>
+        <div><button id="add-rule" class="secondary" type="button">Thêm quy tắc</button></div>
+        <details id="rule-filters">
+          <summary>Bộ lọc bỏ qua</summary>
+          <label for="excluded-paths">Đường dẫn bỏ qua, mỗi dòng một mẫu</label><textarea id="excluded-paths" spellcheck="false"></textarea>
+          <label for="generated-patterns">Tên file tự sinh, mỗi dòng một regex</label><textarea id="generated-patterns" spellcheck="false"></textarea>
+        </details>
+      </fieldset>
+      <fieldset id="rules-json" hidden disabled>
+        <small>Chỉnh <code>target</code> để đặt đích trong WIP. Đặt <code>enabled: false</code> để tắt quy tắc. Thứ tự trong <code>categories</code> là thứ tự thử.</small>
+        <div><label for="rule-document">Cấu hình JSON</label><textarea id="rule-document" spellcheck="false" required></textarea></div>
+      </fieldset>
+      <div class="actions"><button type="submit">Lưu quy tắc</button><button type="button" class="secondary" id="reload-rules">Tải lại quy tắc</button></div>
+    </fieldset>
+    <p id="rules-feedback" role="status"></p>
+  </form>
+</section>
+<template id="rule-card-template">
+  <details class="rule-card">
+    <summary><span data-summary></span><small data-summary-detail></small></summary>
+    <div class="rule-fields">
+      <label>Tên quy tắc<input data-rule="label" required maxlength="120"></label>
+      <label>Mã quy tắc<input data-rule="id" pattern="[a-z][a-z0-9_]{0,39}" required maxlength="40" spellcheck="false"></label>
+      <label>Thư mục đích trong WIP<input data-rule="target" required maxlength="300"></label>
+      <label>Cách xử lý<select data-rule="route_mode">
+        <option value="review_only">Chờ duyệt</option>
+        <option value="managed_move">Tự chuyển khi phân loại</option>
+        <option value="topic_auto">Tự xếp theo độ tin cậy</option>
+      </select></label>
+      <label>Độ tin cậy từ 0 đến 1<input data-rule="confidence" type="number" min="0" max="1" step="any" required></label>
+      <label><input data-rule="enabled" type="checkbox">Bật quy tắc</label>
+    </div>
+    <div class="rule-keyword">
+      <label>Tên file chứa<input data-keyword maxlength="300" autocomplete="off"></label>
+      <button type="button" class="secondary" data-add-keyword>Thêm từ khóa</button>
+    </div>
+    <label>Mẫu khớp, mỗi dòng một regex<textarea data-rule="patterns" spellcheck="false"></textarea></label>
+    <div class="rule-toolbar">
+      <button type="button" class="secondary" data-step="-1">Lên</button>
+      <button type="button" class="secondary" data-step="1">Xuống</button>
+      <button type="button" class="secondary" data-remove>Bỏ quy tắc</button>
+    </div>
+  </details>
+</template>
 <script src="/assets/settings.js" defer></script>
 </main></body></html>

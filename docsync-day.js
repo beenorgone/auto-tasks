@@ -43,6 +43,14 @@ function renderRows(files) {
   for (const item of files) {
     const row = element('tr');
     const file = element('td');
+    if (!item.automatic) {
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.setAttribute('aria-label', 'Chọn ' + item.name);
+      checkbox.setAttribute('data-file-select', '');
+      checkbox.dataset.file = JSON.stringify({path: item.path, name: item.name, token: item.token});
+      file.append(checkbox, ' ');
+    }
     file.append(element('strong', item.name, 'file-name'));
     if (item.path !== item.name) file.append(element('p', item.path, 'file-detail'));
     const category = element('td');
@@ -255,4 +263,5 @@ byId('date').onchange = () => list();
 byId('refresh').onclick = () => list(currentPage);
 byId('previous').onclick = () => list(currentPage - 1);
 byId('next').onclick = () => list(currentPage + 1);
+setupDocSyncFileActions(byId('files'), token, () => list(currentPage));
 list();

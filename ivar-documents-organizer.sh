@@ -2096,7 +2096,7 @@ route_and_apply_managed_file() {
   base=$(basename "$source_path")
   require_command python3
   route_status=0
-  route_line=$(python3 "$WIP_ORGANIZER_PY" route --rules "$rules_file" --path "$base" --source "$source_path" --format tsv) || route_status=$?
+  route_line=$(python3 "$WIP_ORGANIZER_PY" --year-root "$CURRENT_YEAR_ROOT" route --rules "$rules_file" --path "$base" --source "$source_path" --format tsv) || route_status=$?
   if [ "$route_status" -eq 3 ]; then
     info "REVIEW: $source_path [$route_line]"
     return 1
@@ -2138,7 +2138,11 @@ route_and_apply_managed_file() {
       fi
       dest_path="${dest_dir}/${stem}_${sha}${ext}"
     fi
-    run_cmd mv "$source_path" "$dest_path"
+    run_cmd mv -T -n -- "$source_path" "$dest_path"
+    if [ "$DRY_RUN" -eq 0 ] && [ -e "$source_path" ]; then
+      warn "Managed destination already occupied; source kept: $source_path"
+      return 0
+    fi
     info "Managed route: $source_path -> $dest_path [category=$category]"
     record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$dest_path" "managed-route" "" "" "" "" "" "category=$category; $reason"
     return 0

@@ -107,14 +107,19 @@ def is_filed_report(relative):
 def is_intake(relative):
     return len(Path(relative).parts) == 1 or within(str(relative), '00_INBOX') or within(str(relative), INVOICE_INTAKE)
 
-def approved_target(root, target):
-    if target not in REPORT_TARGETS.values():
+def approved_target(root, target, *, configured=False):
+    if not isinstance(target, str) or not target or any(ord(char) < 32 for char in target):
         return False
-    root = Path(root)
-    candidate = root / target
-    # Reject symlink ancestors, including symlinks resolving inside the root.
-    return (not root.is_symlink() and candidate.resolve().is_relative_to(root.resolve())
-            and not any(p.is_symlink() for p in [candidate, candidate.parent]))
+    allowed = target in REPORT_TARGETS.values()
+    if configured:
+        allowed |= any(within(target, topic) for topic in TOPICS.values()) and not within(target, INVOICE_INTAKE)
+    if not allowed or Path(target).as_posix() != target or any(part.startswith('.') for part in Path(target).parts):
+        return False
+    try:
+        candidate = safe_directory(root, target)
+        return all(not parent.exists() or parent.is_dir() for parent in (candidate, *candidate.parents))
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 def safe_directory(root, relative):

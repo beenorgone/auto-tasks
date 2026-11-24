@@ -61,7 +61,7 @@ class DocSyncTests(unittest.TestCase):
             (root/'iv-company-batch1.xlsx').write_text('vat')
             (root/'unknown.txt').write_text('unknown')
             WIP.scan(root, [], True)
-            target=root/'20_BAO_CAO/GHTK';target.mkdir(parents=True, exist_ok=True)
+            target=root/'Giao vận/GHTK';target.mkdir(parents=True, exist_ok=True)
             (target/'GHTK_report.xlsx').write_text('filed')
             WIP.scan(root, [], True)
             before = {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file() and not p.name.endswith(("-shm", "-wal"))}

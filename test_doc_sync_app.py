@@ -1,11 +1,13 @@
 import importlib.util
 import json
 import http.client
+import os
 import threading
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("doc_sync_app", Path(__file__).with_name("doc-sync-app.py"))
@@ -104,9 +106,85 @@ if "dashboard" in sys.argv:
             server.server_close()
             thread.join()
 
-    def test_run_request_rejects_invalid_token(self):
-        self.assertFalse(APP.secrets.compare_digest("invalid", APP.APP_STATE.csrf_token))
-        self.assertEqual({"mode": "preview", "syncProject": False}, json.loads('{"mode":"preview","syncProject":false}'))
+    def test_history_accepts_only_known_commands_and_runs_without_project_sync(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = self.make_state(temporary)
+            with patch.object(APP, "APP_STATE", state), patch.dict("os.environ", {"STATE_DIR": temporary}):
+                with APP.ThreadingHTTPServer(("127.0.0.1", 0), APP.AppHandler) as server:
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                    try:
+                        connection.request("GET", "/history")
+                        response = connection.getresponse()
+                        self.assertEqual(200, response.status)
+                        markup = response.read().decode()
+                        self.assertIn('id="classification-command"', markup)
+                        self.assertIn(f'data-token="{state.csrf_token}"', markup)
+                        self.assertIn('<option value="phân loại">', markup)
+                        self.assertIn('/assets/history.js', markup)
+                        for command, token, expected in (
+                            ("phân loại", "invalid", 403),
+                            ("docsync apply; echo unexpected", state.csrf_token, 400),
+                            (["phân loại"], state.csrf_token, 400),
+                            ("  XEM   TRƯỚC  ", state.csrf_token, 202),
+                            ("docsync apply", state.csrf_token, 202),
+                        ):
+                            connection.request("POST", "/api/run", json.dumps({"command": command, "syncProject": True}),
+                                               {"Content-Type": "application/json", "X-CSRF-Token": token})
+                            response = connection.getresponse()
+                            self.assertEqual(expected, response.status)
+                            response.read()
+                            if expected != 202:
+                                self.assertEqual("idle", state.snapshot()["mode"])
+                                continue
+                            snapshot = self.wait_for_run(state)
+                            self.assertEqual(0, snapshot["exitCode"])
+                            mode = "apply" if command == "docsync apply" else "preview"
+                            self.assertEqual(mode, snapshot["mode"])
+                            self.assertIn("--no-sync", snapshot["logs"][0])
+                            self.assertEqual(mode == "preview", "--dry-run" in snapshot["logs"][0])
+                    finally:
+                        connection.close()
+                        server.shutdown()
+                        thread.join()
+
+    def test_folder_settings_take_effect_without_restarting_app(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            new_root = home / "WIP mới"
+            accounting = home / "Đích kế toán"
+            new_root.mkdir()
+            accounting.mkdir()
+            state = APP.RunState()
+            with patch.object(APP, "APP_STATE", state), patch.dict(os.environ, {"HOME": temporary}, clear=True):
+                with APP.ThreadingHTTPServer(("127.0.0.1", 0), APP.AppHandler) as server:
+                    thread = threading.Thread(target=server.serve_forever, daemon=True)
+                    thread.start()
+                    connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                    try:
+                        connection.request("GET", "/settings")
+                        response = connection.getresponse()
+                        self.assertEqual(200, response.status)
+                        self.assertIn(b'id="folder-settings"', response.read())
+                        paths = {"DOCSYNC_ROOT": str(new_root), "IVAR_DATA": str(accounting),
+                                 "DOCSYNC_DOCUMENTS_SCAN": "", "DOCSYNC_DOWNLOADS_SCAN": ""}
+                        body = json.dumps({"paths": paths})
+                        connection.request("POST", "/api/settings", body)
+                        response = connection.getresponse()
+                        self.assertEqual(403, response.status)
+                        response.read()
+                        self.assertNotEqual(new_root, state.year_root)
+                        connection.request("POST", "/api/settings", body, {"X-CSRF-Token": state.csrf_token})
+                        response = connection.getresponse()
+                        self.assertEqual(200, response.status)
+                        self.assertEqual(paths, json.load(response)["paths"])
+                        connection.request("GET", "/api/status")
+                        self.assertEqual(str(new_root), json.load(connection.getresponse())["yearRoot"])
+                    finally:
+                        connection.close()
+                        server.shutdown()
+                        thread.join()
 
 
 if __name__ == "__main__":

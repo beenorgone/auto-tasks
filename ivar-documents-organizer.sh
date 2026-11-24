@@ -14,10 +14,10 @@ if [ -d "${SCRIPT_DIR}/.venv-docsync/bin" ]; then
 fi
 WIP_ORGANIZER_PY="${WIP_ORGANIZER_PY:-${SCRIPT_DIR}/wip-organizer.py}"
 HOME_DIR=${HOME:-/home/beenorgone}
-DOCS_ROOT="${HOME_DIR}/Documents"
-DOWNLOADS_ROOT="${HOME_DIR}/Downloads"
-IVAR_DATA="${IVAR_DATA:-${DOCS_ROOT}/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu}"
-STATE_DIR="${STATE_DIR:-${DOCS_ROOT}/.auto-tasks/ivar-documents-organizer}"
+workspace_config=$(python3 "${SCRIPT_DIR}/docsync_paths.py") || exit 1
+eval "$workspace_config"
+DOCS_ROOT="$DOCSYNC_DOCUMENTS_SCAN"
+DOWNLOADS_ROOT="$DOCSYNC_DOWNLOADS_SCAN"
 LOG_DIR="${STATE_DIR}/logs"
 DB_PATH="${STATE_DIR}/processed.db"
 VENDOR_DB_PATH="${STATE_DIR}/vendors.db"
@@ -28,7 +28,9 @@ CURRENT_MONTH=$(printf '%s' "$CURRENT_DATE" | cut -d- -f2)
 CURRENT_DAY=$(printf '%s' "$CURRENT_DATE" | cut -d- -f3)
 # Keep the legacy variable name for the shared intake/routing helpers. The work
 # root is stable across years; only monthly archives are partitioned by year.
-WORK_ROOT="${DOCSYNC_ROOT:-${DOCS_ROOT}/WIP & Reference}"
+WORK_ROOT="$DOCSYNC_ROOT"
+eval "$(python3 "${SCRIPT_DIR}/docsync_layout.py" --shell)"
+INVOICE_INTAKE="${WORK_ROOT}/${INVOICE_INTAKE_REL}"
 CURRENT_YEAR_ROOT="$WORK_ROOT"
 CURRENT_MONTH_ROOT="${WORK_ROOT}/${CURRENT_YEAR}/${CURRENT_YEAR}-${CURRENT_MONTH}"
 DRY_RUN=0
@@ -1889,7 +1891,7 @@ process_po_document() {
     po_year=$CURRENT_YEAR
     warn "PO filename has no single valid YYYY-MM-DD date; routing to purchase reports: $source_path"
   fi
-  dest_dir="${WORK_ROOT}/20_BAO_CAO/Nhap hang"
+  dest_dir="${WORK_ROOT}/${PO_REPORT_REL}"
   ensure_dir "$dest_dir"
   target="${dest_dir}/$(basename "$source_path")"
   if [ -e "$target" ]; then
@@ -1910,7 +1912,7 @@ process_mo_document() {
   file_mtime=$2
   file_size=$3
   sha=$4
-  dest_dir="${CURRENT_MONTH_ROOT}/documents/lệnh sản xuất (MO)"
+  dest_dir="${WORK_ROOT}/${MO_REPORT_REL}"
   ensure_dir "$dest_dir"
   target="${dest_dir}/$(basename "$source_path")"
   if [ -e "$target" ]; then
@@ -1970,24 +1972,10 @@ process_unc_pdf() {
 }
 
 process_general_bucket() {
-  source_path=$1
-  file_mtime=$2
-  file_size=$3
-  sha=$4
-  if [ "$CURRENT_DAY" != "01" ] && [ "$DEEP_MODE" -ne 1 ]; then
-    info "Kept in place (monthly grouping waits for day 01 or --deep): $source_path"
-    return 0
-  fi
-  bucket=$(classify_general_bucket "$source_path")
-  dest_dir="${CURRENT_MONTH_ROOT}/${bucket}"
-  ensure_dir "$dest_dir"
-  target="${dest_dir}/$(basename "$source_path")"
-  if [ -e "$target" ]; then
-    target="${dest_dir}/${sha}_$(basename "$source_path")"
-  fi
-  run_cmd mv "$source_path" "$target"
-  info "Grouped file -> $target"
-  record_processed "$source_path" "$file_mtime" "$file_size" "$sha" "$target" "bucketed" "$CURRENT_YEAR" "$CURRENT_MONTH" "" "" "" "$bucket"
+  # Work topics replace the old extension/month fallback. Never hide an
+  # unresolved decision in documents/photos merely because the month changed.
+  info "Needs work-topic review; keeping source for Telegram: $1"
+  return 0
 }
 
 process_year_inbox() {
@@ -2066,53 +2054,9 @@ process_invoice_xml() {
 }
 
 maybe_rollover_previous_month() {
-  if [ "$CURRENT_DAY" != "01" ] && [ "$DEEP_MODE" -ne 1 ]; then
-    return 0
-  fi
-
-  if [ "$DEEP_MODE" -eq 1 ]; then
-    prev_year=$CURRENT_YEAR
-    prev_month=$CURRENT_MONTH
-    prev_root=$CURRENT_MONTH_ROOT
-    info "Deep mode enabled. Applying first-day rollover rules to current month: $prev_root"
-  else
-    prev_month_date=$(date -d "${CURRENT_YEAR}-${CURRENT_MONTH}-01 -1 month" '+%Y-%m-%d' 2>/dev/null || true)
-    if [ -z "$prev_month_date" ]; then
-      warn "Skipping previous month rollover because 'date -d' is unavailable."
-      return 0
-    fi
-
-    prev_year=$(printf '%s' "$prev_month_date" | cut -d- -f1)
-    prev_month=$(printf '%s' "$prev_month_date" | cut -d- -f2)
-    prev_root="${WORK_ROOT}/${prev_year}/${prev_year}-${prev_month}"
-  fi
-
-  if [ ! -d "$prev_root" ]; then
-    info "Previous month folder not found: $prev_root"
-    return 0
-  fi
-
-  info "First day rollover rules active. Grouping loose files in $prev_root"
-
-  find "$prev_root" -maxdepth 1 -type f | while IFS= read -r cleanup_file; do
-    cleanup_base=$(basename "$cleanup_file")
-    cleanup_lower=$(printf '%s' "$cleanup_base" | tr '[:upper:]' '[:lower:]')
-    case "$cleanup_lower" in
-      temp|temp.*|temp-*|temp_*|*.log)
-        run_cmd rm -f "$cleanup_file"
-        info "Deleted temporary file from previous month: $cleanup_file"
-        continue
-        ;;
-    esac
-  done
-
-  find "$prev_root" -maxdepth 1 -type f | while IFS= read -r loose_file; do
-    bucket=$(classify_general_bucket "$loose_file")
-    bucket_dir="${prev_root}/${bucket}"
-    ensure_dir "$bucket_dir"
-    run_cmd mv "$loose_file" "$bucket_dir/$(basename "$loose_file")"
-    info "Grouped previous-month loose file -> ${bucket_dir}/$(basename "$loose_file")"
-  done
+  # Existing year/month archives are read-only history. Classification now
+  # uses work evidence and Telegram decisions, never an automatic month reset.
+  return 0
 }
 
 is_approved_managed_target() {
@@ -2244,6 +2188,15 @@ process_source_file() {
   fi
 
   sha=$(sha256_file "$source_path")
+  if [ -f "$STATE_DIR/topic-telegram-state.json" ]; then
+    hold_status=0
+    python3 "$SCRIPT_DIR/docsync_topics.py" "$CURRENT_YEAR_ROOT" "$STATE_DIR" "$source_path" "$sha" || hold_status=$?
+    case "$hold_status" in
+      0) info "Giữ lại theo quyết định DocSync: $source_path"; return 0 ;;
+      1) ;;
+      *) error "Cannot check DocSync classification decision: $source_path"; return 1 ;;
+    esac
+  fi
 
   # Fast Saokenhanh exports encode the statement period in the filename.
   # File them by year in the explicitly requested bank statement archive.
@@ -2303,7 +2256,7 @@ process_source_file() {
   if [ "$PLAN_MANAGED_RULES" -eq 1 ] || [ "$APPLY_MANAGED_RULES" -eq 1 ]; then
     route_intake=0
     case "$source_dir_for_route" in
-      "$CURRENT_YEAR_ROOT"|"${CURRENT_YEAR_ROOT}/00_INBOX"|"${CURRENT_YEAR_ROOT}/00_INBOX/"*) route_intake=1 ;;
+      "$CURRENT_YEAR_ROOT"|"${CURRENT_YEAR_ROOT}/00_INBOX"|"${CURRENT_YEAR_ROOT}/00_INBOX/"*|"$INVOICE_INTAKE"|"${INVOICE_INTAKE}/"*) route_intake=1 ;;
     esac
     if [ "$route_intake" -eq 1 ]; then
       case "$route_file_lower" in
@@ -2507,15 +2460,22 @@ scan_current_month() {
     done
   fi
 
+  if [ -d "$INVOICE_INTAKE" ]; then
+    info "Scanning invoice topic: $INVOICE_INTAKE"
+    find "$INVOICE_INTAKE" -type f ! -name '.*' | while IFS= read -r source_path; do
+      process_source_file "$source_path" "$tmp_root"
+    done
+  fi
+
   if [ -d "$DOCS_ROOT" ]; then
-    info "Scanning loose files in Documents root: $DOCS_ROOT"
+    info "Scanning loose files in primary intake: $DOCS_ROOT"
     find "$DOCS_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
       process_source_file "$source_path" "$tmp_root"
     done
   fi
 
   if [ -d "$DOWNLOADS_ROOT" ]; then
-    info "Scanning loose files in Downloads root: $DOWNLOADS_ROOT"
+    info "Scanning loose files in secondary intake: $DOWNLOADS_ROOT"
     find "$DOWNLOADS_ROOT" -maxdepth 1 -type f ! -name '.*' | while IFS= read -r source_path; do
       process_source_file "$source_path" "$tmp_root"
     done
@@ -2922,13 +2882,12 @@ main() {
   fi
 
   if [ "$RESCAN_UNC_MODE" -ne 1 ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" \
-        --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$DOCS_ROOT" --intake "$DOWNLOADS_ROOT"
-    else
-      python3 "${SCRIPT_DIR}/docsync_purchase.py" --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" --apply \
-        --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$DOCS_ROOT" --intake "$DOWNLOADS_ROOT"
-    fi
+    set -- --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" \
+      --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$INVOICE_INTAKE"
+    [ -z "$DOCS_ROOT" ] || set -- "$@" --intake "$DOCS_ROOT"
+    [ -z "$DOWNLOADS_ROOT" ] || set -- "$@" --intake "$DOWNLOADS_ROOT"
+    [ "$DRY_RUN" -eq 1 ] || set -- "$@" --apply
+    python3 "${SCRIPT_DIR}/docsync_purchase.py" "$@"
   fi
 
   info "Sync completed."

@@ -11,7 +11,9 @@ import shutil
 import sqlite3
 from pathlib import Path
 from docsync_core import WIP
-from docsync_layout import DIRECTORIES, CATEGORY_TARGETS, OLD_TARGETS, B2B_PRICES, B2B_RECONCILIATION
+from docsync_purchase import rename_no_replace
+from docsync_layout import (DIRECTORIES, CATEGORY_TARGETS, OLD_TARGETS, B2B_PRICES,
+                            B2B_RECONCILIATION, LAYOUT_MOVES, topic_path, AUDIT_DIRECTORY)
 
 # Whole-folder mappings preserve filenames and internal dossier structure.
 FOLDER_MOVES = {
@@ -48,6 +50,8 @@ FOLDER_MOVES = {
     '91_TECH_QUARANTINE': '90_CACH_LY_KY_THUAT',
     '99_ARCHIVE_MANIFESTS': '99_NHAT_KY',
 }
+FOLDER_MOVES = {old: topic_path(new) for old, new in FOLDER_MOVES.items()}
+FOLDER_MOVES.update(LAYOUT_MOVES)
 EMPTY_LEGACY = ('10_WIP', '90_NEEDS_REVIEW', 'AT. B2', 'Others/Bột củ dền-20260629T032657Z-3-001')
 
 
@@ -68,7 +72,7 @@ def digest(path):
     return WIP.digest(path)
 
 
-def build_plan(root: Path) -> dict:
+def build_plan(root: Path, folder_moves=None, file_moves=None) -> dict:
     entries = []
     source_dirs = set()
     target_dirs = set(DIRECTORIES)
@@ -82,13 +86,14 @@ def build_plan(root: Path) -> dict:
         stat = src.stat()
         entries.append(dict(source=source, destination=destination, sha256=digest(src),
                             size=stat.st_size, mtime_ns=stat.st_mtime_ns, inode=stat.st_ino))
-    for old, new in FOLDER_MOVES.items():
+    for old, new in (FOLDER_MOVES if folder_moves is None else folder_moves).items():
         source = safe_path(root, old)
         if not source.exists():
             continue
         if not source.is_dir():
             raise ValueError(f'Expected directory: {source}')
         source_dirs.add(old); target_dirs.add(new)
+        source_dirs.update(str(p) for p in Path(old).parents if str(p) != '.')
         for item in sorted(source.rglob('*')):
             relative = item.relative_to(root).as_posix()
             safe_path(root, relative)
@@ -99,8 +104,13 @@ def build_plan(root: Path) -> dict:
                 add(relative, target)
             else:
                 raise ValueError(f'Unsupported source type: {item}')
+    for old, new in (file_moves or {}).items():
+        source = safe_path(root, old)
+        if not source.is_file():
+            raise ValueError(f'Expected source file: {source}')
+        add(old, new)
     b2b = safe_path(root, 'AT. B2')
-    if b2b.is_dir():
+    if folder_moves is None and file_moves is None and b2b.is_dir():
         for item in sorted(b2b.rglob('*')):
             relative = item.relative_to(root).as_posix()
             safe_path(root, relative)
@@ -157,6 +167,11 @@ def remap_index(root, entries):
             if matches:
                 conn.execute('UPDATE documents SET path=? WHERE path=?', (item['destination'], matches[0]))
                 count += 1
+        for table in ('documents', 'dossiers'):
+            for (target,) in conn.execute(f'SELECT DISTINCT proposed_target FROM {table} WHERE proposed_target IS NOT NULL').fetchall():
+                new_target = topic_path(target)
+                if target != new_target:
+                    conn.execute(f'UPDATE {table} SET proposed_target=? WHERE proposed_target=?', (new_target, target))
         for category, old_targets in OLD_TARGETS.items():
             for old_target in old_targets:
                 for table in ('documents', 'dossiers'):
@@ -189,7 +204,7 @@ def unaffected_snapshot(root, excluded, state_dir):
             dirs[:] = []
             continue
         if Path(current) == root:
-            dirs[:] = [name for name in dirs if name not in ('.wip', '99_NHAT_KY')]
+            dirs[:] = [name for name in dirs if name not in ('.wip', '.docsync', '99_NHAT_KY')]
         for name in files:
             path = Path(current) / name
             relative = path.relative_to(root).as_posix()
@@ -199,13 +214,16 @@ def unaffected_snapshot(root, excluded, state_dir):
     return result
 
 
-def apply_plan(root, state_dir):
+def apply_plan(root, state_dir, folder_moves=None, file_moves=None, locked=False, expected_hashes=None):
     state_dir.mkdir(parents=True, exist_ok=True)
     with (state_dir / 'organizer.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        plan = build_plan(root)  # Recheck the live filesystem under the shared lock.
+        if not locked:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        plan = build_plan(root, folder_moves, file_moves)  # Recheck under the shared lock.
+        if expected_hashes and any(expected_hashes.get(item['source']) != item['sha256'] for item in plan['entries']):
+            raise ValueError('File đã thay đổi sau khi chọn. Làm mới lịch sử và thử lại.')
         unaffected = unaffected_snapshot(root, {item['source'] for item in plan['entries']}, state_dir)
-        stamp = dt.datetime.now().astimezone().strftime('%Y%m%dT%H%M%S%z')
+        stamp = dt.datetime.now().astimezone().strftime('%Y%m%dT%H%M%S%f%z')
         backup = root / '.wip' / ('layout-backup-' + stamp)
         backup.mkdir(parents=True, exist_ok=False)
         for source, name in [(root / '.wip/index.sqlite', 'index.sqlite'), (state_dir / 'processed.db', 'processed.db')]:
@@ -235,7 +253,7 @@ def apply_plan(root, state_dir):
                 if digest(source) != item['sha256'] or target.exists():
                     raise ValueError(f'Source changed or destination appeared: {source}')
                 mkdir(target.parent)
-                source.rename(target)
+                rename_no_replace(source, target)
                 audit['moved'].append(item['source']); save()
                 stat = target.stat()
                 if digest(target) != item['sha256'] or stat.st_ino != item['inode'] or stat.st_mtime_ns != item['mtime_ns']:
@@ -252,7 +270,7 @@ def apply_plan(root, state_dir):
             audit['unaffected_files_verified'] = len(unaffected)
             audit['status'] = 'verified'
             save()
-            report = root / '99_NHAT_KY' / ('layout-migration-' + stamp + '.json')
+            report = root / AUDIT_DIRECTORY / ('layout-migration-' + stamp + '.json')
             shutil.copy2(manifest, report)
             return report, audit
         except Exception as error:

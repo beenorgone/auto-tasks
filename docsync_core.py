@@ -10,8 +10,9 @@ import subprocess
 import time
 from pathlib import Path
 import docsync_purchase as PURCHASE
+import docsync_topics as TOPIC_ROUTER
 from docsync_layout import is_filed_report, is_intake, approved_target
-from docsync_paths import work_root
+from docsync_paths import state_directory, work_root
 
 ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('docsync_wip', ROOT / 'wip-organizer.py')
@@ -24,6 +25,9 @@ def board(year_root: Path) -> dict:
     purchase_cards = (PURCHASE.cards(PURCHASE.purchase_root(), PURCHASE.intake_paths())
                       if year_root.resolve() == work_root().resolve() else [])
     purchase_paths = {card['path'] for card in purchase_cards}
+    topic_cards = (TOPIC_ROUTER.cards(year_root, WIP, state_directory())
+                   if year_root.resolve() == work_root().resolve() else [])
+    topic_paths = {card['path'] for card in topic_cards}
     rule_file = WIP.rules_path(year_root)
     rules = json.loads(rule_file.read_text()) if rule_file.exists() else WIP.DEFAULT_RULES
     records = {}
@@ -36,8 +40,10 @@ def board(year_root: Path) -> dict:
     cards = []
     root_paths = {p.name: p for p in year_root.iterdir() if p.is_file() and not p.name.startswith('.') and not p.is_symlink()}
     for relative in sorted(set(records) | set(root_paths)):
+        if relative.startswith(('.docsync/', '.wip/')):
+            continue
         path = year_root / relative
-        if str(path) in purchase_paths:
+        if str(path) in purchase_paths or relative in topic_paths:
             continue
         if not path.resolve().is_relative_to(year_root.resolve()):
             continue
@@ -65,6 +71,7 @@ def board(year_root: Path) -> dict:
         cards.append(dict(path=relative, category=category, stage=stage, reason=reason, target=target, mode=mode,
                           dossier=old['dossier_id'] if unchanged else None, next=next_action))
     cards.extend(purchase_cards)
+    cards.extend(topic_cards)
     return {'cards': cards, 'counts': {stage: sum(c['stage'] == stage for c in cards) for stage in STAGES}}
 
 def health(year_root: Path) -> dict:
@@ -76,7 +83,8 @@ def health(year_root: Path) -> dict:
             services[unit] = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line) if result.returncode == 0 else {'ActiveState': 'unknown'}
         except (OSError, subprocess.TimeoutExpired):
             services[unit] = {'ActiveState': 'unknown'}
-    log_path = year_root.parent / '.auto-tasks/ivar-documents-organizer/logs' / (dt.date.today().isoformat() + '.log')
+    state = state_directory()
+    log_path = state / 'logs' / (dt.date.today().isoformat() + '.log')
     recent = []
     if log_path.is_file():
         with log_path.open('rb') as handle:
@@ -91,7 +99,7 @@ def health(year_root: Path) -> dict:
     except ValueError:
         next_run = None
     busy = False
-    lock_path = year_root.parent / '.auto-tasks/ivar-documents-organizer/organizer.lock'
+    lock_path = state / 'organizer.lock'
     if lock_path.is_file():
         with lock_path.open('rb') as lock:
             try:

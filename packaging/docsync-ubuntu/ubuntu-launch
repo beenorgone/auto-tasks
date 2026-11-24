@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run the installed DocSync CLI or one of its Ubuntu service entry points.
+set -eu
+
+app=$(dirname -- "$(readlink -f -- "$0")")
+export STATE_DIR="${STATE_DIR:-$(dirname -- "$app")/state}"
+export PYTHONPATH="$app/vendor${PYTHONPATH:+:$PYTHONPATH}"
+
+if [ "${0##*/}" = docsync ]; then
+    exec "$app/docsync" "$@"
+fi
+
+case "${1:-status}" in
+    app) shift; exec /usr/bin/python3 "$app/doc-sync-app.py" "$@" ;;
+    watcher) exec /usr/bin/python3 "$app/docsync_watcher.py" ;;
+    open)
+        systemctl --user start ivar-document-sync-app.service
+        exec xdg-open http://127.0.0.1:8787/
+        ;;
+    status) exec systemctl --user status ivar-document-sync-app.service ivar-watcher.service --no-pager ;;
+    *) echo "Cách dùng: $0 [open|status]" >&2; exit 2 ;;
+esac

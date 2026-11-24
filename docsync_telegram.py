@@ -11,6 +11,9 @@ import tempfile
 import time
 from pathlib import Path
 import docsync_purchase as purchase
+import docsync_topics as topics
+from docsync_layout import TOPICS, safe_directory
+from docsync_paths import work_root
 
 STATE = Path(os.environ.get('STATE_DIR', str(Path(__file__).parent / 'ivar-documents-organizer')))
 
@@ -43,7 +46,7 @@ def remote(config, payload):
     command = shlex.join(['wp', '--path=' + config['wp_path'], '--skip-plugins', '--skip-themes', 'eval', php])
     result = subprocess.run(['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
                              '--', config['host'], command], input=json.dumps(payload),
-                            capture_output=True, text=True, timeout=30)
+                            capture_output=True, text=True, timeout=150 if payload.get('op') == 'wordquest_extract' else 30)
     for line in reversed(result.stdout.splitlines()):
         if line.startswith('DOCSYNC_JSON:'):
             response = json.loads(line.removeprefix('DOCSYNC_JSON:'))
@@ -52,6 +55,32 @@ def remote(config, payload):
             raise RuntimeError('Telegram bridge: ' + str(response.get('error', 'remote_failure')))
     # Do not surface remote logs/config contents in notifications or exceptions.
     raise RuntimeError(f'Telegram bridge unavailable (SSH/WP exit {result.returncode})')
+
+
+def trash_file(source, record, state, index, records):
+    """Soft-delete an exact approved file under organizer.lock; journal before rename."""
+    record['delete_requested'] = True
+    target = state / 'telegram-trash' / record['id'] / source.name
+    if not purchase.safe(source) or not purchase.safe(target):
+        record.update(status='blocked', reason='Symlink; không xóa')
+    elif not source.exists() and target.is_file() and purchase.sha256(target) == record['sha256']:
+        record.update(status='deleted', trash=str(target))  # Recover rename before index save.
+    elif not source.is_file():
+        record.update(status='blocked', reason='Chỉ xóa file; giữ nguyên thư mục hoặc nguồn không tồn tại')
+    elif purchase.sha256(source) != record['sha256']:
+        record.update(status='stale', reason='File đã thay đổi; không xóa')
+    elif target.exists():
+        record.update(status='blocked', reason='Thùng rác đã có file; không ghi đè')
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        record['trash'] = str(target)
+        save(index, records)  # Durable intent includes source (index key), hash and restore path.
+        source.rename(target)  # Fail closed on cross-device moves; never copy then unlink.
+        if purchase.sha256(target) != record['sha256']:
+            target.rename(source)
+            raise RuntimeError('File changed during trash move')
+        record.update(status='deleted', deleted=time.time())
+    save(index, records)
 
 
 def sync(root, intakes, state, config, call=remote):
@@ -66,6 +95,9 @@ def sync(root, intakes, state, config, call=remote):
             record['status'] = 'expired'
             continue
         response = call(config, {'op': 'read', 'id': record['id']})
+        if response.get('status') == 'delete_requested':
+            trash_file(Path(source), record, state, index, records)
+            continue
         if response.get('status') == 'approved' and response.get('group') in purchase.GROUPS:
             path = Path(source)
             # Recover a crash after the audited rename but before saving this index.
@@ -92,7 +124,11 @@ def sync(root, intakes, state, config, call=remote):
             records[source]['status'] = 'completed'
     save(index, records)
     for record in records.values():
-        if record['status'] == 'completed' and not record.get('notified'):
+        if record['status'] in ('blocked', 'stale') and record.get('delete_requested') and not record.get('notified'):
+            call(config, {'op': 'delete_failed', 'id': record['id']})
+            record['notified'] = True
+            save(index, records)
+        if record['status'] in ('completed', 'deleted') and not record.get('notified'):
             call(config, {'op': 'complete', 'id': record['id']})
             record['notified'] = True
             save(index, records)
@@ -135,7 +171,125 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return  # Timer retries; never compete with the main organizer.
-        sync(purchase.purchase_root(), purchase.intake_paths(), STATE, config)
+        failures = []
+        for operation in (
+                lambda: sync(purchase.purchase_root(), purchase.intake_paths(), STATE, config),
+                lambda: sync_topics(work_root(), STATE, config)):
+            try:
+                operation()
+            except (RuntimeError, OSError, ValueError) as error:
+                failures.append(str(error))
+        if failures:
+            raise RuntimeError('; '.join(failures))
+    from docsync_wordquest import process as wordquest_process
+    wordquest_process(STATE, config, remote, save)
+
+
+def sync_topics(root, state, config, call=remote, wip=None):
+    """Caller holds organizer.lock. Batch Telegram questions; never accept paths from chat."""
+    if wip is None:
+        from docsync_core import WIP as wip
+    index = state / topics.REVIEW_FILE
+    before = index.read_text() if index.exists() else ''
+    records = json.loads(before) if before else {}
+    proposals = list(topics.candidates(root, wip, records))
+    automatic = {}
+    for item in proposals:
+        source = item['source']
+        if item['stage'] == 'ready' and topics.settled(source):
+            automatic[item['relative']] = item['target']
+    if automatic:
+        topics.apply_routes(root, state, automatic, locked=True)
+        print(f'Topic routes: verified {len(automatic)} source items', flush=True)
+    pending = {relative: r for relative, r in records.items() if r['status'] in ('pending', 'queued', 'wordquest_failed')}
+    responses = {}
+    approved_routes = {}
+    if pending:
+        ids = [r['id'] for r in pending.values()]
+        for start in range(0, len(ids), 64):
+            responses.update(call(config, {'op': 'read_topics', 'ids': ids[start:start+64]})['records'])
+    for relative, record in pending.items():
+        response = responses.get(record['id'], {})
+        if time.time() - record['created'] > 7 * 86400:
+            record['status'] = 'expired'
+            continue
+        if response.get('status') in ('wordquest_requested','wordquest_ready','wordquest_failed'):
+            record['status'] = response['status']
+        elif response.get('status') == 'delete_requested':
+            trash_file(safe_directory(root, relative), record, state, index, records)
+        elif response.get('status') == 'held':
+            record['status'] = 'held'
+        elif response.get('status') == 'approved' and response.get('topic') in TOPICS:
+            source = safe_directory(root, relative)
+            destination = TOPICS[response['topic']] + '/' + source.name
+            target = safe_directory(root, destination)
+            # A prior run may have finished the rename before saving this index.
+            if not source.exists() and target.exists() and topics.fingerprint(target) == record['sha256']:
+                record.update(status='completed', destination=destination)
+                continue
+            if not source.exists() or topics.fingerprint(source) != record['sha256']:
+                record['status'] = 'stale'
+                continue
+            if target.exists():
+                record.update(status='blocked', reason='Đích đã tồn tại; giữ nguyên nguồn')
+                continue
+            record['destination'] = destination
+            approved_routes[relative] = destination
+        elif response.get('sent'):
+            record['status'] = response['status']
+    save(index, records)
+    if approved_routes:
+        topics.apply_routes(root, state, approved_routes, locked=True)
+        for relative, destination in approved_routes.items():
+            if topics.fingerprint(root / destination) != records[relative]['sha256']:
+                raise RuntimeError('Topic contents changed during filing: ' + relative)
+            records[relative]['status'] = 'completed'
+        save(index, records)
+    for record in records.values():
+        if record['status'] in ('blocked', 'stale') and record.get('delete_requested') and not record.get('notified'):
+            call(config, {'op': 'delete_failed', 'id': record['id']})
+            record['notified'] = True
+            save(index, records)
+        if record['status'] in ('completed', 'deleted') and not record.get('notified'):
+            call(config, {'op': 'complete', 'id': record['id']})
+            record['notified'] = True
+            save(index, records)
+    queued = []
+    for item in topics.candidates(root, wip, records):
+        if item['stage'] == 'ready':
+            continue
+        source, key = item['source'], item['relative']
+        if not topics.settled(source):
+            continue
+        record = records.get(key)
+        signature = topics.metadata_key(source)
+        digest = topics.cached_fingerprint(source, record or {})
+        if topics.metadata_key(source) != signature:
+            continue
+        if record and record['sha256'] == digest and record['status'] in ('pending', 'held', 'completed', 'expired', 'blocked', 'wordquest_requested', 'wordquest_ready', 'wordquest_failed'):
+            continue
+        if not record or record['sha256'] != digest or record['status'] != 'queued':
+            created = time.time()
+            record = dict(id=hashlib.sha256(f'topic:{root}:{key}:{digest}:{created}'.encode()).hexdigest()[:32],
+                          sha256=digest, signature=signature, status='queued', created=created, reason=item['reason'])
+            records[key] = record
+            save(index, records)
+        queued.append(dict(id=record['id'], name=key))
+    # Five independent choices in one message, at most eight messages per run.
+    for start in range(0, min(len(queued), 40), 5):
+        response = call(config, dict(op='submit_topics', proposals=queued[start:start+5],
+                                    login=config['login'], bot=config['bot']))
+        for record in records.values():
+            remote_record = response['records'].get(record['id'])
+            if remote_record and remote_record.get('sent'):
+                record['status'] = remote_record['status']
+        save(index, records)
+    print('Topic Telegram pending: ' + str(sum(r['status'] == 'pending' for r in records.values())), flush=True)
+    if automatic or approved_routes or (index.exists() and index.read_text() != before):
+        folder_reviews = [relative for relative, record in records.items()
+                          if record['status'] in ('pending', 'held') and safe_directory(root, relative).is_dir()]
+        wip.scan(root, [*wip.DEFAULT_SCOPES, *folder_reviews], True)
+        wip.dashboard(root)
 
 
 if __name__ == '__main__':

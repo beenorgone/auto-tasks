@@ -18,3 +18,8 @@ ivar-documents-organizer/unc.db-shm
 ivar-documents-organizer/purchase-telegram.json
 ivar-documents-organizer/purchase-telegram-state.json
 ivar-documents-organizer/purchase-months.jsonl
+ivar-documents-organizer/topic-telegram-state.json
+ivar-documents-organizer/wordquest.lock
+
+# Recoverable files removed through Telegram (never commit document contents).
+ivar-documents-organizer/telegram-trash/

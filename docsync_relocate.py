@@ -11,6 +11,7 @@ import re
 import shutil
 import sqlite3
 from pathlib import Path
+from docsync_layout import AUDIT_DIRECTORY
 from docsync_paths import archive_relative
 
 
@@ -136,15 +137,15 @@ def rewrite_metadata(root, plan, backup_dir):
                 category['target'] = map_absolute(target, plan) if target.startswith('/') else map_relative(target, plan)
         save(rules, json.dumps(data, ensure_ascii=False, indent=2) + '\n')
     # Preserve historical source/destination text; change clickable current links.
-    reports = root / '99_NHAT_KY'
-    for path in reports.glob('*.html'):
+    reports = [root / '99_NHAT_KY', root / AUDIT_DIRECTORY]
+    for path in [p for folder in reports for p in folder.glob('*.html')]:
         content = path.read_text()
         for old, new in plan['month_moves'].items():
             content = content.replace((Path(plan['source']) / old).as_uri() + '/',
                                       (root / new).as_uri() + '/')
         content = content.replace(Path(plan['source']).as_uri() + '/', root.as_uri() + '/')
         save(path, content)
-    for path in reports.glob('*.json'):
+    for path in [p for folder in reports for p in folder.glob('*.json')]:
         data = json.loads(path.read_text())
         if not isinstance(data, dict) or not isinstance(data.get('events'), list):
             continue
@@ -233,8 +234,8 @@ def apply_plan(source, destination, state, audit_dir):
             audit['file_count'] = len(entries)
             audit['status'] = 'verified'
             audit['completed_at'] = dt.datetime.now().astimezone().isoformat(); save()
-            report = destination / '99_NHAT_KY' / ('root-relocation-' + audit_dir.name + '.json')
-            report.parent.mkdir(exist_ok=True)
+            report = destination / AUDIT_DIRECTORY / ('root-relocation-' + audit_dir.name + '.json')
+            report.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(manifest, report)
             return report, audit
         except Exception as error:

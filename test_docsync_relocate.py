@@ -39,6 +39,7 @@ class RelocationTests(unittest.TestCase):
             conn.execute('CREATE TABLE vendors(last_source_path TEXT,last_final_path TEXT)')
             conn.execute('INSERT INTO vendors VALUES (?,?)', (str(source),str(source)))
         report = self.old / '99_NHAT_KY/moves.html'
+        report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text('<a href="'+source.as_uri()+'">Open document</a>')
         return source
 
@@ -106,7 +107,7 @@ class RelocationTests(unittest.TestCase):
         self.assertEqual(self.new/'2027/2027-01',month_root(self.new,2027,1))
         with self.assertRaises(ValueError):month_root(self.new,2026,13)
 
-    def test_year_boundary_rollover_and_new_intake_use_stable_root(self):
+    def test_year_boundary_keeps_unresolved_intake_and_archives_in_place(self):
         work=self.home/'Documents/WIP & Reference';work.mkdir()
         old_month=work/'2026/2026-12';old_month.mkdir(parents=True)
         (old_month/'previous.txt').write_bytes(b'previous-month document')
@@ -117,8 +118,9 @@ class RelocationTests(unittest.TestCase):
         env.pop('DOCSYNC_ROOT',None)
         result=subprocess.run(['sh',str(ROOT/'ivar-documents-organizer.sh'),'--no-sync','--quiet'],env=env,capture_output=True,text=True)
         self.assertEqual(0,result.returncode,result.stderr)
-        self.assertEqual(b'previous-month document',(old_month/'documents/previous.txt').read_bytes())
-        self.assertEqual(b'current-year document',(work/'2027/2027-01/documents/incoming.txt').read_bytes())
+        self.assertEqual(b'previous-month document',(old_month/'previous.txt').read_bytes())
+        self.assertEqual(b'current-year document',(work/'incoming.txt').read_bytes())
+        self.assertFalse((work/'2027').exists())
         self.assertFalse((self.home/'Documents/2027').exists())
         self.assertFalse((work/'01').exists())
 

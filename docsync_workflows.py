@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -34,6 +35,7 @@ PICKUP_NAME = re.compile(r'GHTK_bao_cao_van_hanh_va_dong_tien_\d{2}_\d{2}_S\d+\.
 SETTLE_NS = 20_000_000_000
 RETENTION_SECONDS = 60 * 86400
 MAX_ATTEMPTS = 4
+LOGGER = logging.getLogger(__name__)
 
 CATALOG = (
     (LOCAL, 'Phân loại chứng từ trên máy', 'File mới trong vùng tiếp nhận DocSync',
@@ -341,8 +343,9 @@ def submit(root, file, relative, signature, tries, key, since, draft_batches):
             validate_pickup_workbook(stream)
         else:
             validate_payment_statement(stream, file.suffix.lower())
+        record(root, relative, signature, 'running', tries, 'Đang gửi báo cáo lên EIM.')
 
-    record(root, relative, signature, 'running', tries, 'Đang gửi báo cáo lên EIM.')
+    record(root, relative, signature, 'checking', tries, 'Đang kiểm tra file và quyền gửi EIM.')
     try:
         client = saved_client()
         args = SimpleNamespace(action='reconcile', type=REPORT_TYPES[key], file=file, send=True, carrier_mode=carrier_mode)
@@ -363,6 +366,10 @@ def submit(root, file, relative, signature, tries, key, since, draft_batches):
         return
     except (OSError, ValueError):
         record(root, relative, signature, 'review', tries, 'Kiểm tra quyền đọc file và tài khoản DocSync.')
+        return
+    except Exception:
+        LOGGER.exception('Lượt xử lý báo cáo GHTK gặp lỗi.')
+        record(root, relative, signature, 'review', tries, 'Lượt xử lý bị lỗi. Xem nhật ký watcher để biết chi tiết.')
         return
     data = result['result']
     if result['duplicate']:

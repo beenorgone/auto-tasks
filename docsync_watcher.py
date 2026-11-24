@@ -2,11 +2,12 @@
 """Debounced non-recursive intake watcher with bounded polling and retry."""
 from concurrent.futures import ThreadPoolExecutor
 import docsync_purchase as PURCHASE
+import os
 import subprocess
 import sqlite3
 import time
 from pathlib import Path
-from docsync_paths import work_root
+from docsync_paths import workspace_paths
 import docsync_workflows as workflows
 
 ROOT = Path(__file__).resolve().parent
@@ -50,13 +51,11 @@ class Queue:
 
 
 def main():
-    home = Path.home()
-    def roots():
-        year = work_root(home)
-        return [year, year / '00_INBOX', year / '00_INBOX/Hoa don', home / 'Documents', home / 'Downloads']
-    def current():
-        return {**snapshot(roots()), **PURCHASE.snapshot(PURCHASE.purchase_root(home))}
-    queue = Queue(current())
+    def current(paths):
+        return {**snapshot(PURCHASE.intake_paths(paths=paths)),
+                **PURCHASE.snapshot(PURCHASE.purchase_root(paths=paths))}
+    previous_paths = workspace_paths()
+    queue = Queue(current(previous_paths))
     uploads = ThreadPoolExecutor(max_workers=1, thread_name_prefix='docsync-intake')
     upload = None
     last_error = None
@@ -64,11 +63,17 @@ def main():
     while True:
         time.sleep(POLL_SECONDS)
         try:
-            root = work_root(home)
+            paths = workspace_paths()
+            observed = current(paths)
+            if paths != previous_paths:
+                previous_paths = paths
+                queue = Queue(observed)
+            root = Path(paths['DOCSYNC_ROOT'])
             rules = workflows.settings(root)
-            if queue.observe(current(), time.monotonic()) and rules[workflows.LOCAL][0]:
+            if queue.observe(observed, time.monotonic()) and rules[workflows.LOCAL][0]:
                 print('Stable intake change detected; running shared organizer', flush=True)
-                code = subprocess.call(['/bin/sh', str(ROOT / 'ivar-documents-organizer.sh'), '--apply-managed-rules', '--no-sync'])
+                code = subprocess.call(['/bin/sh', str(ROOT / 'ivar-documents-organizer.sh'), '--apply-managed-rules', '--no-sync'],
+                                       env={**os.environ, **paths})
                 queue.complete(code, time.monotonic())
                 print(f'Organizer exit={code}; retry={queue.pending}', flush=True)
             if upload is not None and upload.done():

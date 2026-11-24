@@ -39,23 +39,23 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual('verified',audit['status'])
             self.assertEqual(3,audit['index_rows_remapped'])
             self.assertEqual(1,audit['processed_rows_remapped'])
-            self.assertEqual(b'report bytes',(root/'20_BAO_CAO/GHTK/GHTK_test.xlsx').read_bytes())
+            self.assertEqual(b'report bytes',(root/'Giao vận/GHTK/GHTK_test.xlsx').read_bytes())
             self.assertEqual(b'price list',(root/B2B_PRICES/'Bang gia B2B.pdf').read_bytes())
-            self.assertEqual({'Bang gia','Doi soat cong no'}, {p.name for p in (root/'10_HO_SO/Kinh doanh/B2B').iterdir()})
+            self.assertEqual({'Bang gia','Doi soat cong no'}, {p.name for p in (root/'Kinh doanh/B2B').iterdir()})
             WIP.scan(root, [], True)
             with WIP.open_db(WIP.db_path(root)) as conn:
-                row=conn.execute("SELECT dossier_id,classification_reason,status,proposed_target FROM documents WHERE path='10_HO_SO/Bao bi/label.pdf'").fetchone()
-                self.assertEqual((dossier,'manual review: manual decision','approved','10_HO_SO/Bao bi'),tuple(row))
+                row=conn.execute("SELECT dossier_id,classification_reason,status,proposed_target FROM documents WHERE path='Sản xuất/Bao bì/label.pdf'").fetchone()
+                self.assertEqual((dossier,'manual review: manual decision','approved','Sản xuất/Bao bì'),tuple(row))
                 self.assertEqual(0,conn.execute("SELECT COUNT(*) FROM documents WHERE active=1 AND path LIKE 'AT.%'").fetchone()[0])
             with sqlite3.connect(state/'processed.db') as conn:
-                self.assertEqual(str(root/'20_BAO_CAO/GHTK/GHTK_test.xlsx'),conn.execute('SELECT final_path FROM processed_files').fetchone()[0])
+                self.assertEqual(str(root/'Giao vận/GHTK/GHTK_test.xlsx'),conn.execute('SELECT final_path FROM processed_files').fetchone()[0])
             self.assertEqual([],build_plan(root)['entries'])
             self.assertEqual(1,board(root)['counts']['filed'])
 
     def test_conflict_aborts_before_any_move(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);state,_=self.fixture(root)
-            target=root/'20_BAO_CAO/GHTK/GHTK_test.xlsx';target.write_bytes(b'keep this')
+            target=root/'Giao vận/GHTK/GHTK_test.xlsx';target.write_bytes(b'keep this')
             with self.assertRaises(FileExistsError): apply_plan(root,state)
             self.assertEqual(b'keep this',target.read_bytes())
             self.assertTrue((root/'AT. GHTK reports/GHTK_test.xlsx').exists())
@@ -72,13 +72,13 @@ class LayoutTests(unittest.TestCase):
 
     def test_symlink_target_rejected_before_initialization(self):
         with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
-            root=Path(temp);(root/'20_BAO_CAO').symlink_to(outside,target_is_directory=True)
-            self.assertFalse(approved_target(root,'20_BAO_CAO/VAT'))
+            root=Path(temp);(root/'Kế toán - tài chính').symlink_to(outside,target_is_directory=True)
+            self.assertFalse(approved_target(root,'Kế toán - tài chính/VAT'))
             with self.assertRaises(ValueError): WIP.ensure_state(root)
             self.assertEqual([],list(Path(outside).iterdir()))
 
     def test_folder_context_and_b2b_have_stable_categories(self):
-        for path,category in [('10_HO_SO/Kinh doanh/B2B/Doi soat cong no/cong no.xlsx','commerce'),('10_HO_SO/Nhap hang/Hop dong/contract.pdf','sourcing_logistics'),('10_HO_SO/Chat luong/Inulin/COA/test.pdf','quality_regulatory')]:
+        for path,category in [('Kinh doanh/B2B/Doi soat cong no/cong no.xlsx','commerce'),('Mua hàng - dịch vụ/Hop dong/contract.pdf','purchasing'),('QC/Inulin/COA/test.pdf','quality_regulatory')]:
             self.assertEqual(category,WIP.classify(Path(path),WIP.DEFAULT_RULES)[0])
         for name,target in [('Bang gia B2B.pdf',B2B_PRICES),('Doi soat cong no B2B.xlsx',B2B_RECONCILIATION)]:
             result=WIP.classify(Path(name),WIP.DEFAULT_RULES)
@@ -92,7 +92,7 @@ class LayoutTests(unittest.TestCase):
         migrated,changed=WIP.migrate_rules(rules)
         self.assertTrue(changed)
         values={r['id']:r['target'] for r in migrated['categories']}
-        self.assertEqual('20_BAO_CAO/VAT',values['vat'])
+        self.assertEqual('Kế toán - tài chính/VAT',values['vat'])
         self.assertEqual('Custom sales',values['commerce'])
         self.assertFalse(WIP.migrate_rules(migrated)[1])
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cài đặt · DocSync</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fffbfe;color:#201d26;font:15px/1.5 Roboto,Arial,sans-serif}
+main{max-width:1240px;margin:auto;padding:28px 22px 48px}h1{margin:0 0 14px;font-size:clamp(28px,6vw,40px);letter-spacing:-.035em}
+form{max-width:860px;padding:20px;background:#f6effa;border:1px solid #e7dfea;border-radius:16px}
+fieldset{border:0;padding:0;margin:0;min-width:0;display:grid;gap:17px}
+label{display:block;font-weight:700}input{display:block;width:100%;margin:5px 0;padding:10px 12px;font:inherit;color:inherit;background:#fff;border:1px solid #81748b;border-radius:10px}
+input[readonly]{background:#eee8f0}small{display:block;color:#5f5966;font-size:13px}
+button{min-height:42px;border:0;border-radius:22px;background:#6750a4;color:#fff;font:inherit;font-weight:650;padding:8px 17px;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #6750a4;outline-offset:3px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:17px}#feedback{margin:0;color:#205e37}#feedback[data-error]{color:#8c1d18}
+@media(max-width:560px){main{padding:22px 13px}form{padding:14px}}
+</style></head><body><main>
+<h1>Cài đặt thư mục</h1>
+<form id="folder-settings" data-token=__DOCSYNC_TOKEN__>
+  <fieldset disabled>
+    <div><label for="work-root">Thư mục WIP</label><input id="work-root" name="DOCSYNC_ROOT" required autocomplete="off" spellcheck="false">
+      <small>Thư mục làm việc chính của DocSync. Mỗi WIP có chỉ mục và công tắc workflow riêng.</small></div>
+    <div><label for="scan-primary">Thư mục quét bổ sung 1</label><input id="scan-primary" name="DOCSYNC_DOCUMENTS_SCAN" autocomplete="off" spellcheck="false">
+      <small>DocSync quét file ngay trong thư mục này. Để trống để bỏ qua.</small></div>
+    <div><label for="scan-secondary">Thư mục quét bổ sung 2</label><input id="scan-secondary" name="DOCSYNC_DOWNLOADS_SCAN" autocomplete="off" spellcheck="false">
+      <small>Thư mục quét thứ hai, thường là Downloads. Để trống để bỏ qua.</small></div>
+    <div><label for="accounting">Thư mục đích kế toán</label><input id="accounting" name="IVAR_DATA" required autocomplete="off" spellcheck="false">
+      <small>Gốc lưu hóa đơn, sao kê, UNC và hồ sơ mua vào theo các quy tắc hiện hành.</small></div>
+    <small>Nhập đường dẫn tuyệt đối đến thư mục có sẵn trên máy. File và lịch sử hiện có vẫn nằm ở vị trí cũ.</small>
+    <div><button type="submit">Lưu thư mục</button></div>
+  </fieldset>
+  <div class="actions" aria-live="polite"><p id="feedback" role="status"></p></div>
+</form>
+<script src="/assets/settings.js" defer></script>
+</main></body></html>

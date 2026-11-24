@@ -1,6 +1,6 @@
 > Từ 29/10/2026, thư mục làm việc mặc định là `~/Documents/WIP & Reference`.
 > Các thư mục tháng cũ được giữ dưới `2026/2026-MM` (ví dụ `2026/2026-10`).
-> Từ các năm sau, rule gom tháng dùng `<năm>/<năm>-<MM>` trong cùng gốc này.
+> Từ 12/11/2026, file mới phân loại theo chủ đề công việc; không tự gom theo đuôi file vào tháng mới.
 > Hồ sơ, báo cáo, `00_INBOX`, `.wip` và `duplicates` nằm trực tiếp ở gốc.
 > CLI, web và watcher cùng dùng gốc mặc định này; có thể cấu hình bằng `DOCSYNC_ROOT`.
 > `docsync --root <path>` và tên tham số cũ `--year-root` đều được hỗ trợ.
@@ -13,54 +13,58 @@ DocSync nhận diện và sắp xếp tài liệu, hiển thị việc cần là
 - Giao diện web: <http://127.0.0.1:8787>
 - Thư mục tài liệu mặc định: `~/Documents/WIP & Reference` (dùng chung qua các năm).
 
-## Cấu trúc thư mục từ 29/10/2026
+Máy Ubuntu cài mới dùng [bộ chạy DocSync cho Ubuntu](packaging/docsync-ubuntu/README.md).
+
+## Cấu trúc theo chủ đề công việc từ 12/11/2026
 
 ```text
 WIP & Reference/
-├── 00_INBOX/Hoa don/
-├── 10_HO_SO/
-│   ├── Ke toan/
-│   ├── Chat luong/
-│   ├── Bao bi/
-│   ├── Kinh doanh/B2B/
-│   │   ├── Bang gia/
-│   │   └── Doi soat cong no/
-│   ├── Phap ly/
-│   └── Nhap hang/
-├── 20_BAO_CAO/
-│   ├── VAT/
+├── Sản xuất/
+│   └── Bao bì/
+├── Mua hàng - dịch vụ/
+│   └── PO/
+├── Giao vận/
 │   ├── Shopee/
 │   ├── GHTK/
-│   └── Sao ke/
-├── 80_THAM_CHIEU/
-│   ├── Bieu mau/Sao ke/
-│   ├── Quy chuan/
-│   └── Ma QR/
-├── 90_CACH_LY_KY_THUAT/
-├── 99_NHAT_KY/
+│   └── Chứng từ/
+├── Kinh doanh/
+│   └── B2B/Bang gia/ và B2B/Doi soat cong no/
+├── QC/
+│   └── Quy chuẩn/
+├── Kế toán - tài chính/
+│   ├── Sao kê/
+│   ├── VAT/
+│   ├── Hóa đơn/
+│   └── Biểu mẫu/Sao kê/
+├── Pháp Lý/
+├── .docsync/       # Nhật ký kiểm chứng và cách ly mã kỹ thuật
+├── .wip/          # Chỉ mục, cấu hình và Kanban
+├── 2026/          # Các thư mục lưu theo tháng đang có
 ├── Others/
-├── 2026/
-│   └── 2026-01/ ... 2026-10/   # Các tháng đã có
-├── duplicates/                 # UNC trùng, chờ dọn sau
-└── .wip/
+└── duplicates/
 ```
 
-Tên thư mục mô tả nội dung. Trạng thái xử lý nằm trên Kanban; `10_WIP` và
-`90_NEEDS_REVIEW` cũ chỉ được bỏ khi rỗng. B2B hiện chỉ có **bảng giá** và
-**đối soát công nợ**. Phân loại B2B vẫn cần duyệt, không tự chuyển theo tên.
+Thư mục thể hiện **chủ đề công việc**; trạng thái chờ duyệt/đang xử lý/đã lưu nằm
+trên Kanban. Các nhóm cũ `10_HO_SO`, `20_BAO_CAO`, `80_THAM_CHIEU` được chuyển
+qua bảng ánh xạ có kiểm tra hash, chỉ mục và nhật ký; chỉ bỏ thư mục nguồn khi rỗng.
+Mục chưa xác định được chủ đề giữ nguyên vị trí và gửi bot Telegram để bạn chọn.
 
-`10_HO_SO` là nơi làm việc với hồ sơ nghiệp vụ. Bộ xử lý hóa đơn/UNC vẫn sử dụng
-đích kế toán chính thức đang cấu hình trong project IVAR.
+Chỉ tài liệu có quy tắc rõ, một chủ đề và đủ độ tin cậy mới tự chuyển. Tài liệu
+có quyết định thủ công được giữ lại để chốt; báo cáo Shopee/GHTK thuộc Giao vận,
+file nhập sản phẩm/marketing Shopee vẫn cần xác định theo công việc thực tế.
+ZIP hồ sơ PO tiếp tục dùng kho mua vào kế toán chính thức và quy tắc lịch sử NCC.
+Đổi cấu trúc WIP không di chuyển kho bên ngoài này và không bật đồng bộ Drive.
 
-Đợt đổi cấu trúc giữ nguyên tên file và cấu trúc bên trong từng bộ hồ sơ; không
-suy diễn tháng sao kê hay số tài khoản từ ngày tải file. Báo cáo chưa có cấu
-trúc kỳ rõ ràng được giữ trong nhóm báo cáo tương ứng. Phạm vi Scan bao gồm
-Inbox, Hồ sơ, Báo cáo, Tham chiếu và Cách ly kỹ thuật, không bao gồm `Others`.
+Cầu nối Telegram gửi nhiều mục trong một tin, nhưng mỗi mục có mã riêng. Trả lời
+`/ds MÃ NHÓM`, dùng mã hồ sơ 6 ký tự và mã nhóm `sx`, `mh`, `gv`, `kd`,
+`qc`, `kt`, `pl`; chọn `g` để giữ nguyên. Ví dụ: `/ds a1b2c3 sx d4e5f6 kt`.
+Một tin chốt tối đa 10 mục; hỗ trợ xuống dòng, dấu phẩy hoặc chấm phẩy giữa các cặp.
+Lệnh `/ds` hiển thị hướng dẫn. `/docsync`, mã hồ sơ 32 ký tự và tên nhóm cũ vẫn dùng được. Quyết định gắn với toàn
+bộ nội dung file/thư mục, chỉ tài khoản liên kết sở hữu yêu cầu được chốt trong
+7 ngày. Nội dung thay đổi phải tạo yêu cầu mới; không ghi đè đích trùng.
 
-Nhật ký chuyển nằm trong `99_NHAT_KY/layout-migration-*.json`; bản sao chỉ mục,
-rule và database đường dẫn trước khi chuyển nằm trong `.wip/layout-backup-*`.
-Di chuyển thủ công bằng file manager có thể làm lệch chỉ mục; hãy dùng quy trình
-migration có kiểm tra hash và cập nhật đường dẫn khi đổi cấu trúc tiếp.
+Nhật ký chuyển và bản sao chỉ mục nằm ở `.docsync/Nhật ký/layout-migration-*.json`
+và `.wip/layout-backup-*`. Lệnh Preview và xem Kanban không di chuyển tài liệu.
 
 ## 1. Bắt đầu nhanh
 
@@ -162,7 +166,8 @@ Lỗi tạm thời có thời gian chờ trước khi thử lại. Đơn đủ �
 
 **GHTK · Đối soát thanh toán** nhận biên bản CSV/XLSX có tên mẫu
 `bien_ban_doi_soat_S…` trong `Giao vận/GHTK`. Watcher kiểm tra tiêu đề của mẫu trước
-khi gửi. Tài khoản cần được duyệt `eim_carrier_delivery`. Bật thêm **Dựng lô hóa đơn nháp**
+khi gửi. Nhật ký Workflows chuyển từ **Đang kiểm tra** sang **Đang gửi** sau khi
+file và quyền gửi đều hợp lệ. Tài khoản cần được duyệt `eim_carrier_delivery`. Bật thêm **Dựng lô hóa đơn nháp**
 khi tài khoản được duyệt `eim_carrier_draft_batches`. DocSync chọn chế độ tương ứng
 cho từng biên bản. EIM giữ trạng thái đơn WooCommerce và xác nhận thanh toán ngoài
 hai chế độ này. Quyền được kiểm tra lại ở mỗi lượt. File đã có trước thời điểm bật
@@ -240,7 +245,7 @@ Ngoài 4 rule managed, Apply còn chạy các bộ xử lý kế toán hiện c�
 
 UNC và hóa đơn (PDF/XML) đã có bản lưu chỉ được coi là trùng khi khớp cả dung lượng và SHA-256 với file đích còn tồn tại. UNC trùng được giữ tại `<Documents>/WIP & Reference/duplicates`; hóa đơn trùng được đổi tên ngay cạnh nguồn với hậu tố `_duplicate` và số tránh trùng tên. Không ghi đè bản đã có và không xóa bản trùng. Preview kiểm tra cùng điều kiện nhưng không chuyển file. Không còn rule gom các file thông thường trùng nội dung vào `<năm>/<tháng>/duplicates`; các thư mục duplicates tháng đã có được giữ nguyên.
 
-Tài liệu PO rời được lưu tại `<Documents>/WIP & Reference/20_BAO_CAO/Nhap hang`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới bỏ qua bộ xử lý PO/trùng chung và được chuyển nguyên bộ khi lịch sử NCC có nhóm nhất quán. Trường hợp chưa rõ được giữ lại và gửi Telegram khi đã cấu hình cầu nối bên dưới.
+Tài liệu PO rời được lưu tại `<Documents>/WIP & Reference/Mua hàng - dịch vụ/PO`. Bộ hồ sơ `ho so PO….zip` thuộc kho `ho so mua vao/<năm>/<nhóm>/<MM>`, không phải báo cáo PO. ZIP mới bỏ qua bộ xử lý PO/trùng chung và được chuyển nguyên bộ khi lịch sử NCC có nhóm nhất quán. Trường hợp chưa rõ được giữ lại và gửi Telegram khi đã cấu hình cầu nối bên dưới.
 
 Chỉ khi muốn chạy thêm đồng bộ project ra ngoài bằng rclone:
 
@@ -279,10 +284,10 @@ Các rule này áp dụng cho file tại gốc năm và trong `00_INBOX`, sau c�
 
 | Mã nhóm | Nhận diện chính | Đích trong thư mục năm |
 |---|---|---|
-| `vat` | Tên chứa `iv-mtt-batch` hoặc `iv-company-batch` | `20_BAO_CAO/VAT` |
-| `shopee_reports` | Mẫu `Order.` hoặc `orders_YYYY-MM-DD_YYYY-MM-DD.xlsx` | `20_BAO_CAO/Shopee` |
-| `ghtk_reports` | Mẫu `GHTK_` hoặc `bien_ban_doi_soat` | `20_BAO_CAO/GHTK` |
-| `bank_statements` | Mẫu `SAOKE`/`sao ke`; các tên giao dịch chung phải kiểm tra nội dung | `20_BAO_CAO/Sao ke` |
+| `vat` | Tên chứa `iv-mtt-batch` hoặc `iv-company-batch` | `Kế toán - tài chính/VAT` |
+| `shopee_reports` | Mẫu `Order.` hoặc `orders_YYYY-MM-DD_YYYY-MM-DD.xlsx` | `Giao vận/Shopee` |
+| `ghtk_reports` | Mẫu `GHTK_` hoặc `bien_ban_doi_soat` | `Giao vận/GHTK` |
+| `bank_statements` | Mẫu `SAOKE`/`sao ke`; các tên giao dịch chung phải kiểm tra nội dung | `Kế toán - tài chính/Sao kê` |
 
 Với `Danh sach giao dich*.xls/xlsx` và `lich-su-giao-dich*.xls/xlsx`, DocSync cần xác nhận thông tin ngân hàng, tài khoản và số dư hoặc ghi nợ/ghi có. File không đọc được, vượt giới hạn hoặc không đủ bằng chứng sẽ chờ duyệt. Bộ đọc XLS cần môi trường `.venv-docsync` và thư viện trong `requirements-docsync.txt`.
 
@@ -310,17 +315,33 @@ Mở <http://127.0.0.1:8787> trên máy chạy DocSync.
 |---|---|
 | Preview routing | Xem trước thao tác, sau đó cập nhật chỉ mục |
 | Cập nhật phân loại | Quét lại chỉ mục phân loại |
-| Lịch sử hôm nay | Xem các lượt đã phân loại hoặc đang chờ duyệt |
+| Lịch sử hôm nay | Nhập lệnh phân loại và xem các lượt đã chuyển hoặc đang chờ duyệt |
+| Cài đặt | Chọn gốc WIP, hai thư mục quét bổ sung và gốc đích kế toán |
 | Apply changes | Mở bước xác nhận chạy organizer |
 | Also run the final rclone project sync | Bật thêm đồng bộ ra ngoài cho lần Apply đó |
 | System health · Intake | Xem watcher, lịch chạy, số lượng hồ sơ và việc tiếp theo |
 
-Thông tin sức khỏe và hàng đợi trên web được làm mới theo chu kỳ 30 giây. Bấm **Làm mới** trong
-**Lịch sử hôm nay** để đọc các lượt phân loại vừa ghi nhận.
+Thông tin sức khỏe và hàng đợi trên **Tổng quan** được làm mới theo chu kỳ 30 giây.
+
+Trong **Lịch sử hôm nay**, nhập **xem trước** (hoặc `docsync preview`) để xem đề xuất,
+hay **phân loại** (hoặc `docsync apply`) để áp dụng quy tắc hiện hành và chuyển các file đủ điều kiện.
+Bấm **Chạy lệnh** và xem tiến độ trong **Nhật ký chạy**. Bảng tự cập nhật sau lượt áp dụng.
+Các lệnh trên tab này chạy với tùy chọn `--no-sync` cho bước đồng bộ rclone.
+Nút **Làm mới** cập nhật các lượt được ghi nhận từ watcher hoặc nơi khác.
+
+Để xử lý một file trong WIP, bấm **Phân loại** ở dòng **Chờ duyệt**. Chọn một trong bảy
+nhóm công việc như trên bot Telegram, kiểm tra thư mục đích rồi bấm **Lưu lựa chọn**.
+Chọn **Giữ lại** để DocSync bỏ qua đúng bản file đó trong các lượt tự động.
+File ZIP hồ sơ PO tiếp tục dùng quy trình chọn **Trong nước** hoặc **Nhập khẩu** riêng.
+
+Trong **Cài đặt**, nhập đường dẫn của thư mục đã tồn tại rồi bấm **Lưu thư mục**.
+Hai ô quét bổ sung có thể để trống. App, CLI và watcher dùng giá trị đã lưu
+từ lượt tiếp theo. Mỗi gốc WIP có chỉ mục và công tắc workflow riêng.
+Biến môi trường đặt sẵn cho dịch vụ hoặc terminal được ưu tiên và hiện chỉ đọc trên web.
 
 ## 6. Tự động chạy và khóa chống trùng
 
-- Watcher theo dõi file trực tiếp trong `~/Documents`, `~/Downloads`, gốc năm, `00_INBOX` và `00_INBOX/Hoa don`. Các thư mục sâu hơn trong Inbox được xử lý khi chạy Apply hoặc timer; watcher không theo dõi đệ quy.
+- Watcher theo dõi file trực tiếp trong `~/Documents`, `~/Downloads`, gốc năm, `00_INBOX` và `Kế toán - tài chính/Hóa đơn`. Các thư mục sâu hơn trong Inbox được xử lý khi chạy Apply hoặc timer; watcher không theo dõi đệ quy.
 - Chu kỳ kiểm tra là 5 giây; chờ 20 giây không có thay đổi mới, rồi chạy. Khoảng nghỉ tối thiểu giữa các lượt là 60 giây.
 - File ẩn, symlink và file tải dở `.part`, `.crdownload`, `.tmp` được bỏ qua khi theo dõi.
 - Các file có sẵn lúc watcher khởi động chờ timer hoặc một lần Apply chủ động.
@@ -396,7 +417,7 @@ Nếu đặt `IVAR_DATA`, rule dùng thư mục `ho so mua vao` bên trong đư�
 
 - Nhận file hoặc thư mục bắt đầu bằng `ho so `, có đúng một ngày hợp lệ `YYYY-MM-DD` trên tên; năm phải khớp thư mục năm.
 - Đích: `<năm>/<MM>/` hoặc `<năm>/nhap khau|trong nuoc/<MM>/`. Hồ sơ trong `Q1`–`Q4` hoặc tháng sai cũng được đưa về tháng đúng; không tự xóa thư mục rỗng.
-- Bộ hồ sơ ZIP mang mã PO vẫn thuộc kho mua vào theo tháng; giữ nguyên nhóm nhập khẩu/trong nước và toàn bộ bộ hồ sơ. Chỉ tài liệu PO rời thuộc báo cáo `20_BAO_CAO/Nhap hang`.
+- Bộ hồ sơ ZIP mang mã PO vẫn thuộc kho mua vào theo tháng; giữ nguyên nhóm nhập khẩu/trong nước và toàn bộ bộ hồ sơ. Chỉ tài liệu PO rời thuộc báo cáo `Mua hàng - dịch vụ/PO`.
 - Chuyển nguyên thư mục hồ sơ, bao gồm ghi chú; không giải nén ZIP. Không suy đoán tháng từ ngày sửa file.
 - Kanban: `ready` khi cần chuyển, `filed` khi đúng tháng, `needs_review` khi tên/ngày/năm không rõ hoặc đích trùng. Với rule này, sửa tên/vị trí hoặc kiểm tra đích trùng rồi chạy Preview; không dùng `review <dossier>`.
 - `docsync rules` hiển thị rule; `docsync preview` chỉ in kế hoạch. `docsync apply` áp dụng trong khóa chung, ghi nguồn/đích vào `ivar-documents-organizer/purchase-months.jsonl` để truy vết/hoàn tác thủ công.
@@ -406,16 +427,40 @@ Nếu đặt `IVAR_DATA`, rule dùng thư mục `ho so mua vao` bên trong đư�
 
 ### ZIP mới và quyết định Telegram
 
-- Nhận ZIP `ho so PO… - YYYY-MM-DD - NCC ….zip` tại gốc WIP, `00_INBOX` (kể cả thư mục con), gốc Documents và Downloads.
+- Nhận ZIP `ho so PO… - YYYY-MM-DD - NCC ….zip` tại gốc WIP, `Kế toán - tài chính/Hóa đơn` và Inbox cũ còn sót (kể cả thư mục con), gốc Documents và Downloads.
 - Chỉ so tên NCC đầy đủ, chuẩn hóa Unicode và chữ hoa/thường. Không ghép gần đúng. Chỉ dùng hồ sơ đã lưu đúng tháng trong nhóm `nhap khau` hoặc `trong nuoc`; lịch sử không có nhóm không phải căn cứ suy luận.
 - Nếu mọi hồ sơ lịch sử có cùng nhóm, tự chuyển theo năm/tháng trên tên ZIP. Nếu không có lịch sử hoặc có cả hai nhóm, giữ lại chờ bạn quyết định.
 - Kanban dùng chung đề xuất, lý do và đích; yêu cầu đã gửi Telegram ở trạng thái `waiting_external`. Không ghi đè; ghi SHA-256, căn cứ lịch sử và nguồn/đích trong `purchase-months.jsonl`.
 - Cầu nối `docsync_telegram.py` dùng SSH và WP-CLI tới bot ERP đã cấu hình. Token bot không được sao chép về máy local. Mã nguồn MU plugin: `telegram/docsync-telegram.php`, cài tại `wp-content/mu-plugins/ivar-docsync-telegram.php` trên ERP.
 - Cấu hình local, không commit: `ivar-documents-organizer/purchase-telegram.json`, gồm `host`, `wp_path`, `login` (đúng tài khoản ERP), `bot` (username không có @). Phải có liên kết Telegram đã được ERP duyệt và SSH hoạt động bằng khóa.
 - Cài hai unit `systemd/docsync-telegram.{service,timer}` vào `~/.config/systemd/user/`, chạy `systemctl --user daemon-reload` rồi `systemctl --user enable --now docsync-telegram.timer`. Timer kiểm tra mỗi phút; dùng khóa organizer chung và chờ file yên ít nhất 20 giây. Dừng bằng `systemctl --user disable --now docsync-telegram.timer`.
-- Bot gửi mã riêng cho từng file. Trả lời `/docsync MÃ trong_nuoc`, `/docsync MÃ nhap_khau` hoặc `/docsync MÃ giu_lai`. Chỉ tài khoản liên kết sở hữu yêu cầu được quyết định, một lần, trong 7 ngày. Lệnh không gọi AI và không sửa dữ liệu PO của ERP.
+- Bot gửi mã riêng cho từng file. Trả lời `/ds MÃ tn` (trong nước), `/ds MÃ nk` (nhập khẩu) hoặc `/ds MÃ g` (giữ lại). Chỉ tài khoản liên kết sở hữu yêu cầu được quyết định, một lần, trong 7 ngày. Lệnh không gọi AI và không sửa dữ liệu PO của ERP.
 - Phê duyệt gắn với SHA-256 đúng file; file đổi thì cần yêu cầu mới. `giu_lai` tiếp tục có hiệu lực dù về sau xuất hiện lịch sử NCC. Đích trùng/ngày không hợp lệ vẫn cần xử lý riêng, không được vượt qua bằng cách chọn nhóm.
 - Trạng thái và chống gửi lặp lưu tại `purchase-telegram-state.json` (không commit). Đề xuất ERP hết hạn sau 7 ngày, tự dọn sau 30 ngày. Yêu cầu hết hạn giữ nguyên file; cần tạo lại trạng thái yêu cầu sau khi kiểm tra.
 - Máy local phải đang chạy và có mạng để nhận quyết định. Bot xác nhận **đã ghi nhận** trước; sau khi chuyển và kiểm tra hash, bot mới báo **đã chuyển**. Không bật đồng bộ Drive.
 
 Hướng dẫn kỹ thuật: [triển khai, setup, logic, nghiệm thu và rollback](docs/DOCSYNC-DEPLOYMENT.md).
+
+
+## Yêu cầu xóa file qua Telegram
+
+- `/rm a1b2c3` hoặc `/ds a1b2c3 rm`: yêu cầu xóa file của đề xuất đang chờ quyết định.
+- `/rm a1b2c3 d4e5f6`: tối đa 10 mã/tin; không nhận đường dẫn, wildcard hay tùy chọn shell.
+- Chỉ chủ tài khoản Telegram đang liên kết và đủ quyền được chốt; giữ hạn 7 ngày và mỗi đề xuất chỉ chốt một lần.
+- Bot báo đã nhận yêu cầu trước. Bridge giữ `organizer.lock`, kiểm tra SHA-256 rồi chuyển file vào `$STATE_DIR/telegram-trash/<id>/<tên file>`; không xóa vĩnh viễn, không xóa thư mục, không ghi đè hoặc đi qua symlink.
+- Chỉ báo hoàn tất sau khi kiểm tra file trong thùng rác. File đã đổi hoặc bị chặn được giữ để kiểm tra; lỗi I/O được timer thử lại.
+- Chỉ mục Telegram lưu đường dẫn nguồn, hash và `trash` để khôi phục trên máy. Muốn khôi phục, tạm dừng timer/watcher, đối chiếu hash và chuyển về đường dẫn nguồn nếu nguồn đang trống; không ghi đè file mới.
+- Thùng rác là dữ liệu vận hành, không đưa vào Git; cần triển khai MU plugin mới và bridge local cùng nhau.
+
+
+### Ảnh từ mới cho WordQuest
+
+Với ảnh đang chờ DocSync, gửi `/ds MÃ wq`. Hỗ trợ JPG/PNG/WebP tối đa 6 MB,
+50 từ/cụm từ tiếng Anh. Bot đọc ảnh qua AI ERP rồi gửi link WordQuest để bạn
+kiểm tra chữ và nghĩa; chỉ sau khi bấm **Lưu giỏ & tạo bài ôn** mới thêm vào
+thư viện. Giỏ hỗ trợ các dạng chọn nghĩa, nhìn nghĩa đoán từ, nghe, điền chữ
+và xếp chữ có sẵn. Ảnh gốc không bị chuyển hay xóa; danh sách từ được gửi trong
+phần fragment của link, không đưa ảnh lên host công khai. Bài học dài có thể
+chia thành nhiều link. Nếu đọc ảnh lỗi, gửi lại `/ds MÃ wq` để thử cùng ảnh;
+ảnh đã thay nội dung cần một đề xuất mới. WordQuest vẫn giữ quyền riêng tư cũ,
+tiến độ và giỏ đã lưu nằm trên trình duyệt đang sử dụng.

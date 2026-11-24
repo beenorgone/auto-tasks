@@ -3,7 +3,7 @@ const byId = id => document.getElementById(id);
 const picker = byId('picker');
 const selection = {};
 const sent = new Map();
-const activityLabels = {done:'EIM đã nhận', running:'Đang gửi EIM', retry:'Chờ thử lại', review:'Cần kiểm tra', paused:'Đã tạm dừng'};
+const activityLabels = {done:'EIM đã nhận', checking:'Đang kiểm tra file', running:'Đang gửi EIM', retry:'Chờ thử lại', review:'Cần kiểm tra', paused:'Đã tạm dừng'};
 let currentPage = 1, configured = false, listing = 0;
 
 function element(tag, text, className) {

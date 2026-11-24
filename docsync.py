@@ -3,16 +3,19 @@
 import docsync_purchase as PURCHASE
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 import docsync_intake
 from docsync_core import ROOT, WIP, STAGES, LABELS, board, health
-from docsync_paths import work_root
+from docsync_paths import workspace_paths
 
 def main(argv=None):
+    paths = workspace_paths()
+    configured_root = Path(paths['DOCSYNC_ROOT'])
     parser = argparse.ArgumentParser(description='DocSync: scan → board → review → preview → apply → verify')
-    parser.add_argument('--root', '--year-root', dest='year_root', type=Path, default=work_root(),
+    parser.add_argument('--root', '--year-root', dest='year_root', type=Path, default=configured_root,
                         help='WIP & Reference root (--year-root remains an alias)')
     sub = parser.add_subparsers(dest='command')
     for name in ('board', 'status'):
@@ -41,12 +44,13 @@ def main(argv=None):
     root = args.year_root.resolve()
     command = args.command or 'board'
     if command in ('preview', 'apply'):
-        if root != work_root().resolve():
+        if root != configured_root.resolve():
             parser.error('preview/apply only support the configured WIP & Reference root')
         flags = ['--plan-managed-rules'] if command == 'preview' else ['--apply-managed-rules']
         if command == 'preview' or not args.sync_project:
             flags.append('--no-sync')
-        result = subprocess.run(['/bin/sh', str(ROOT / 'ivar-documents-organizer.sh'), *flags])
+        result = subprocess.run(['/bin/sh', str(ROOT / 'ivar-documents-organizer.sh'), *flags],
+                                env={**os.environ, **paths})
         if result.returncode:
             return result.returncode
         WIP.scan(root, [], True)

@@ -1,4 +1,4 @@
-"""Prevent old files, wrong report types and paused workflows from being uploaded."""
+"""Prevent old, invalid or paused reports from being uploaded and verify XLSX intake on Python 3.10."""
 
 import io
 import json
@@ -187,6 +187,30 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(payload['carrier_mode'], 'draft_only')
         self.assertIn('xếp hàng dựng lô hóa đơn nháp', workflows.overview(self.root)['activity'][0]['outcome'])
 
+    def test_payment_xlsx_with_shared_strings_is_checked_before_sending(self):
+        self.enable()
+        self.allowed.update(('eim_carrier_delivery', 'eim_carrier_draft_batches'))
+        workflows.set_enabled(self.root, workflows.CARRIER, True, draft_batches=True)
+        self.expected_type = 'carrier_delivery'
+        file = self.ghtk / 'bien_ban_doi_soat_S12_TA_1794856942_453.xlsx'
+        labels = ('STT', 'Mã đơn hàng', 'Mã đơn hàng shop', 'Trạng thái đơn hàng', 'Ngày hoàn thành', 'Tiền CoD')
+        strings = ''.join(f'<si><t>{label}</t></si>' for label in labels)
+        cells = ''.join(f'<c t="s"><v>{index}</v></c>' for index in range(len(labels)))
+        with ZipFile(file, 'w') as archive:
+            archive.writestr('xl/sharedStrings.xml', f'<sst>{strings}</sst>')
+            archive.writestr('xl/worksheets/sheet1.xml', f'<worksheet><sheetData><row>{cells}</row></sheetData></worksheet>')
+        phases = []
+
+        def track_phase(route, *, upload=None, **kwargs):
+            phases.append(workflows.overview(self.root)['activity'][0]['state'])
+            return self.request(route, upload=upload, **kwargs)
+
+        self.client.request.side_effect = track_phase
+        workflows.process_one(self.root)
+        self.assertEqual(phases, ['checking', 'checking', 'running'])
+        self.assertEqual(self.uploaded, [(file.name, file.read_bytes())])
+        self.assertEqual(workflows.overview(self.root)['activity'][0]['state'], 'done')
+
     def test_payment_collision_name_is_validated_and_sent_once(self):
         self.enable()
         self.allowed.add('eim_carrier_delivery')
@@ -208,6 +232,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.uploaded, [(file.name, file.read_bytes())])
         self.assertEqual({Path(item['path']).name: item['state'] for item in workflows.overview(self.root)['activity']},
                          {file.name: 'done', invalid.name: 'review'})
+
+    def test_unexpected_validation_failure_records_review_and_never_uploads(self):
+        self.enable()
+        self.allowed.add('eim_carrier_delivery')
+        workflows.set_enabled(self.root, workflows.CARRIER, True)
+        (self.ghtk / 'bien_ban_doi_soat_S12_TA_1794856942_453.xlsx').write_bytes(workbook('Test'))
+        with patch.object(workflows, 'validate_payment_statement', side_effect=AttributeError('seekable')):
+            with self.assertLogs(workflows.LOGGER, level='ERROR'):
+                workflows.process_one(self.root)
+        self.assertEqual(workflows.overview(self.root)['activity'][0]['state'], 'review')
+        self.assertEqual(self.uploaded, [])
 
 
 if __name__ == '__main__':

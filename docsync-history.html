@@ -8,19 +8,61 @@
 main{max-width:1240px;margin:auto;padding:28px 22px 48px}h1{margin:0;font-size:clamp(27px,5vw,40px);letter-spacing:-.035em}
 .heading{display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:center;margin-bottom:16px}
 .heading p{color:#5f5966;margin:7px 0 0}.button{background:#eee5fb;color:#392460;text-decoration:none;font-weight:600;border-radius:20px;padding:9px 14px}
+.command-panel{background:#f6effa;border:1px solid #e7dfea;border-radius:14px;padding:14px 16px;margin-bottom:16px}
+.command-panel label{display:block;font-weight:700}
+.command-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.command-row input{flex:1 1 245px;min-width:0;background:#fff;color:#201d26;border:1px solid #81748b;border-radius:10px;padding:9px 12px;font:inherit}
+.command-row button{border:0;border-radius:20px;background:#6750a4;color:#fff;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+.command-row button:disabled{opacity:.6;cursor:wait}.command-panel :focus-visible{outline:2px solid #6750a4;outline-offset:2px}
+.command-panel p{margin:8px 0 0;color:#5f5966}.command-panel kbd{font:inherit;font-weight:600}
+#run-status:empty{display:none}#run-status[data-error]{color:#8c1d18}
+#run-details{margin-top:8px}#run-details summary{cursor:pointer;color:#392460}
+#run-log{max-height:16rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#251d2c;color:#fbf3ff;border-radius:10px;padding:12px}
 .table-wrap{overflow:auto;background:#fff;border:1px solid #e7dfea;border-radius:14px}
 table{border-collapse:collapse;width:100%;text-align:left;min-width:640px}th,td{padding:11px 13px;border-bottom:1px solid #e7dfea;vertical-align:top}
 th{font-size:13px;background:#f6effa}td{overflow-wrap:anywhere}tr:last-child td{border-bottom:0}
 td:nth-child(2){max-width:390px}td:nth-child(4){max-width:360px}small{display:block;color:#655c72;margin-top:3px;font-size:12px}
 .chip{display:inline-block;white-space:nowrap;font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px}
 .moved{color:#205e37;background:#e4f3e9}.review{color:#795112;background:#fff1d8}
+.classify-file,.decision-actions button{border:0;border-radius:20px;background:#eee5fb;color:#392460;padding:8px 13px;font:600 14px Roboto,Arial,sans-serif;cursor:pointer;white-space:nowrap}
+.decision{max-width:min(96vw,470px);width:100%;border:1px solid #e7dfea;border-radius:17px;padding:20px;color:#201d26;background:#fffbfe}
+.decision::backdrop{background:#201d2680}.decision h2{margin:0 0 5px;font-size:21px}.decision p{overflow-wrap:anywhere}
+.decision select{display:block;width:100%;padding:9px 12px;margin:6px 0 10px;font:inherit;border:1px solid #81748b;border-radius:10px;background:#fff;color:inherit}
+.decision-actions{display:flex;justify-content:flex-end;gap:8px}.decision-actions [type=submit]{background:#6750a4;color:#fff}.decision-actions button:disabled{opacity:.55}
+#decision-error{color:#8c1d18}#file-action-status:not(:empty){margin:0 0 12px;color:#205e37}
 @media(max-width:650px){main{padding:20px 13px 36px}}
 </style></head><body>
 <main>
-<div class="heading"><div><h1>Lịch sử phân loại hôm nay</h1><p>__DAY__ · __SUMMARY__</p></div><a class="button" href="/history">Làm mới</a></div>
-<div class="table-wrap" role="region" aria-label="Lịch sử phân loại theo file" tabindex="0">
-<table><thead><tr><th scope="col">Giờ</th><th scope="col">File nguồn</th><th scope="col">Nhóm</th><th scope="col">Đích</th><th scope="col">Kết quả</th></tr></thead>
-<tbody>__ROWS__</tbody></table>
+<div class="heading"><div><h1>Lịch sử phân loại hôm nay</h1><p id="history-summary">__DAY__ · __SUMMARY__</p></div><a class="button" href="/history">Làm mới</a></div>
+<section class="command-panel" aria-label="Chạy phân loại">
+<form id="classification-command" data-token="__DOCSYNC_TOKEN__">
+<label for="command">Lệnh phân loại</label>
+<div class="command-row">
+<input id="command" name="command" list="command-options" placeholder="Ví dụ: xem trước" aria-describedby="command-help" autocomplete="off" maxlength="80" required>
+<datalist id="command-options">__COMMAND_OPTIONS__</datalist>
+<button type="submit" disabled>Chạy lệnh</button>
 </div>
+<p id="command-help">Nhập <kbd>xem trước</kbd> để xem đề xuất, hoặc <kbd>phân loại</kbd> để áp dụng quy tắc và chuyển file đủ điều kiện.</p>
+</form>
+<p id="run-status" role="status"></p>
+<details id="run-details" hidden><summary>Nhật ký chạy</summary><pre id="run-log"></pre></details>
+</section>
+<p id="file-action-status" role="status"></p>
+<div class="table-wrap" role="region" aria-label="Lịch sử phân loại theo file" tabindex="0">
+<table><thead><tr><th scope="col">Giờ</th><th scope="col">File nguồn</th><th scope="col">Nhóm</th><th scope="col">Đích</th><th scope="col">Kết quả</th><th scope="col">Thao tác</th></tr></thead>
+<tbody id="history-rows">__ROWS__</tbody></table>
+</div>
+<dialog class="decision" id="file-decision" aria-labelledby="decision-title">
+  <form id="file-decision-form">
+    <h2 id="decision-title">Phân loại file</h2>
+    <p id="decision-file"></p>
+    <label for="decision-topic">Nhóm công việc</label>
+    <select id="decision-topic" required autofocus><option value="">Chọn nhóm</option>__TOPICS__</select>
+    <p id="decision-destination"></p>
+    <p id="decision-error" role="status"></p>
+    <div class="decision-actions"><button type="button" id="cancel-decision">Hủy</button><button type="submit">Lưu lựa chọn</button></div>
+  </form>
+</dialog>
 </main>
+<script src="/assets/history.js" defer></script>
 </body></html>

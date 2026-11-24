@@ -9,7 +9,8 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from docsync_paths import work_root
+from docsync_paths import OPTIONAL_SCAN_PATHS, state_directory, workspace_paths
+from docsync_layout import INVOICE_INTAKE
 
 RULE = 'purchase_months'
 RULE_DESCRIPTION = 'Hồ sơ mua vào: ngày YYYY-MM-DD trên tên → <năm>/<nhóm nếu có>/<MM>; giữ nguyên bộ hồ sơ'
@@ -27,14 +28,15 @@ def supplier(name):
     return unicodedata.normalize('NFC', match[1]).casefold().strip()
 
 
-def intake_paths(home=None):
-    home = Path.home() if home is None else Path(home)
-    root = work_root(home)
-    return (root, root / '00_INBOX', home / 'Documents', home / 'Downloads')
+def intake_paths(home=None, *, paths=None):
+    paths = paths if paths is not None else workspace_paths(home)
+    root = Path(paths['DOCSYNC_ROOT'])
+    return (root, root / '00_INBOX', root / INVOICE_INTAKE,
+            *(Path(paths[key]) for key in OPTIONAL_SCAN_PATHS if paths[key]))
 
 
 def held_decisions(state=None):
-    state = Path(state or os.environ.get('STATE_DIR', str(Path(__file__).parent / 'ivar-documents-organizer')))
+    state = Path(state) if state is not None else state_directory()
     path = state / 'purchase-telegram-state.json'
     records = json.loads(path.read_text()) if path.exists() else {}
     return {source: record for source, record in records.items() if record.get('status') == 'held'}
@@ -54,7 +56,7 @@ def intake_candidates(root, intakes, decisions=None):
         if not folder.is_dir() or not safe(folder):
             continue
         # Same intake scope as the shell: recursive Inbox, direct files elsewhere.
-        if folder.name == '00_INBOX':
+        if folder.name in ('00_INBOX', Path(INVOICE_INTAKE).name):
             paths = []
             for parent, dirs, files in os.walk(folder, followlinks=False):
                 dirs[:] = [d for d in dirs if not d.startswith('.') and not (Path(parent) / d).is_symlink()]
@@ -103,10 +105,9 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def purchase_root(home=None):
-    home = Path.home() if home is None else Path(home)
-    data = Path(os.environ.get('IVAR_DATA', str(home / 'Documents/Drives/gDriveProjects/Working/Projects/IVAR/Accounting - Ke toan/Data - Du lieu')))
-    return data / 'ho so mua vao'
+def purchase_root(home=None, *, paths=None):
+    paths = paths if paths is not None else workspace_paths(home)
+    return Path(paths['IVAR_DATA']) / 'ho so mua vao'
 
 
 def safe(path):
@@ -179,7 +180,7 @@ def cards(root, intakes=()):
                  next={'ready': 'docsync preview → docsync apply', 'filed': 'Đã đúng tháng',
                        'needs_review': 'Xem lý do; xác nhận nhóm qua Telegram nếu chưa rõ; chạy preview lại'}[c['stage']])
             for c in [*candidates(root), *intake_candidates(root, intakes, held_decisions())]]
-    state = Path(os.environ.get('STATE_DIR', str(Path(__file__).parent / 'ivar-documents-organizer')))
+    state = state_directory()
     path = state / 'purchase-telegram-state.json'
     records = json.loads(path.read_text()) if path.exists() else {}
     for card in result:
@@ -188,7 +189,7 @@ def cards(root, intakes=()):
                 and time.time() - record['created'] <= 7 * 86400
                 and sha256(Path(card['path'])) == record['sha256']):
             card.update(stage='waiting_external', reason='Đã gửi yêu cầu Telegram; chờ bạn chọn nhóm hoặc giữ lại',
-                        next='Trả lời lệnh /docsync trong tin nhắn bot; máy kiểm tra mỗi phút')
+                        next='Trả lời lệnh /ds trong tin nhắn bot; máy kiểm tra mỗi phút')
     return result
 
 

@@ -29,7 +29,7 @@ class WipOrganizerTests(unittest.TestCase):
             ("ivarvietnam.com-1787197766379.log", "technical"),
             ("mau-giay-uy-quyen-ca-nhan-cho-ca-nhan_2003225702.docx", "legal_corporate"),
             ("HBL-LSUHPG26071866QDS (3).pdf", "sourcing_logistics"),
-            ("AT. Sourcing contracts/DRAFT SC8965 Bioway.docx", "sourcing_logistics"),
+            ("AT. Sourcing contracts/DRAFT SC8965 Bioway.docx", "purchasing"),
             ("log.adff603fbfbd.txt", "technical"),
         ]:
             actual, confidence, _, _, _ = WIP.classify(Path(path), WIP.DEFAULT_RULES)
@@ -38,11 +38,11 @@ class WipOrganizerTests(unittest.TestCase):
 
     def test_managed_move_rules_route_to_at_folders(self):
         for path, category, target in [
-            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "20_BAO_CAO/VAT"),
-            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "20_BAO_CAO/Shopee"),
-            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "20_BAO_CAO/GHTK"),
-            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "20_BAO_CAO/GHTK"),
-            ("11090087_SAOKE_TK_202608.xlsx", "bank_statements", "20_BAO_CAO/Sao ke"),
+            ("iv-mtt-batch36-20260819-163502.xlsx", "vat", "Kế toán - tài chính/VAT"),
+            ("Order.all.20260701_20260731.xlsx", "shopee_reports", "Giao vận/Shopee"),
+            ("GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx", "ghtk_reports", "Giao vận/GHTK"),
+            ("bien_ban_doi_soat_08_2026.xlsx", "ghtk_reports", "Giao vận/GHTK"),
+            ("11090087_SAOKE_TK_202608.xlsx", "bank_statements", "Kế toán - tài chính/Sao kê"),
         ]:
             actual_category, confidence, reason, actual_target, route_mode = WIP.classify(Path(path), WIP.DEFAULT_RULES)
             self.assertEqual(category, actual_category)
@@ -66,7 +66,7 @@ class WipOrganizerTests(unittest.TestCase):
             category, confidence, target, route_mode, reason = WIP.route_file(
                 rules_file, "GHTK_bao_cao_van_hanh_va_dong_tien_21_08_S12734516.xlsx"
             )
-            self.assertEqual(("ghtk_reports", "20_BAO_CAO/GHTK", "managed_move"), (category, target, route_mode))
+            self.assertEqual(("ghtk_reports", "Giao vận/GHTK", "managed_move"), (category, target, route_mode))
             self.assertGreaterEqual(confidence, 0.85)
             self.assertTrue(reason)
 
@@ -108,8 +108,8 @@ class WipOrganizerTests(unittest.TestCase):
             WIP.rules_path(root).write_text(json.dumps(rules, ensure_ascii=False), encoding="utf-8")
             migrated = WIP.load_rules(root)
             targets = {item["id"]: item["target"] for item in migrated["categories"]}
-            self.assertEqual("20_BAO_CAO/VAT", targets["vat"])
-            self.assertEqual("20_BAO_CAO/Sao ke", targets["bank_statements"])
+            self.assertEqual("Kế toán - tài chính/VAT", targets["vat"])
+            self.assertEqual("Kế toán - tài chính/Sao kê", targets["bank_statements"])
             self.assertEqual("Custom sales target", targets["commerce"])
 
     def test_scan_is_index_only_and_dashboard_is_generated(self):

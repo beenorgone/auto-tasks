@@ -7,6 +7,7 @@ import argparse
 import collections
 import datetime as dt
 import json
+import os
 import secrets
 import shlex
 import subprocess
@@ -14,16 +15,17 @@ import sys
 import threading
 import time
 import webbrowser
+from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 from docsync_core import board, health
-from docsync_paths import work_root
+from docsync_paths import save_workspace_paths, settings_payload, state_directory, work_root, workspace_paths
 import docsync_daily as daily
 import docsync_workflows as workflows
-from docsync_history import render_today
+from docsync_history import decide as decide_history_file, render_today
 import sqlite3
 
 
@@ -35,9 +37,15 @@ LOCAL_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 MAX_LOG_LINES = 400
 DAY_ACTIONS = {f"/api/day/{action}": action for action in ("credential", "types", "targets", "record", "attach")}
-TABS = (("/", "Tổng quan"), ("/day", "File trong ngày"), ("/history", "Lịch sử hôm nay"), ("/workflows", "Workflows"))
+TABS = (("/", "Tổng quan"), ("/day", "File trong ngày"), ("/history", "Lịch sử hôm nay"),
+        ("/workflows", "Workflows"), ("/settings", "Cài đặt"))
 APP_ASSETS = {"/assets/app.css": ("docsync-app.css", "text/css"),
-              "/assets/day.js": ("docsync-day.js", "text/javascript")}
+              "/assets/day.js": ("docsync-day.js", "text/javascript"),
+              "/assets/history.js": ("docsync-history.js", "text/javascript"),
+              "/assets/settings.js": ("docsync-settings.js", "text/javascript")}
+TAB_TEMPLATES = {"/workflows": "docsync-workflows.html", "/day": "docsync-day.html", "/settings": "docsync-settings.html"}
+HISTORY_COMMANDS = {"xem trước": "preview", "phân loại": "apply",
+                    "docsync preview": "preview", "docsync apply": "apply"}
 
 
 class RunState:
@@ -51,8 +59,7 @@ class RunState:
     ) -> None:
         self.script = script
         self.wip_script = wip_script
-        self.year_root = year_root or work_root()
-        self.dashboard_path = self.year_root / ".wip" / "dashboard.html"
+        self.fixed_root = year_root
         self.health_cache = {}
         self.health_cached_at = 0.0
         self.health_lock = threading.Lock()
@@ -66,8 +73,13 @@ class RunState:
         self.exit_code: int | None = None
         self.logs: collections.deque[str] = collections.deque(maxlen=MAX_LOG_LINES)
 
+    @property
+    def year_root(self) -> Path:
+        return self.fixed_root or work_root()
+
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            root = self.year_root
             return {
                 "running": self.running,
                 "mode": self.mode,
@@ -75,8 +87,8 @@ class RunState:
                 "finishedAt": self.finished_at,
                 "exitCode": self.exit_code,
                 "logs": list(self.logs),
-                "kanbanAvailable": self.dashboard_path.is_file(),
-                "yearRoot": str(self.year_root),
+                "kanbanAvailable": (root / ".wip" / "dashboard.html").is_file(),
+                "yearRoot": str(root),
             }
 
     def overview(self) -> dict[str, Any]:
@@ -96,26 +108,29 @@ class RunState:
             return False, f"Sync script is unavailable: {self.script}"
         if not self.wip_script.is_file():
             return False, f"WIP rule engine is unavailable: {self.wip_script}"
-        if not self.year_root.is_dir():
-            return False, f"WIP & Reference folder is unavailable: {self.year_root}"
         with self.lock:
             if self.running:
                 return False, "A document sync run is already in progress."
+            paths = workspace_paths()
+            root = self.fixed_root or Path(paths["DOCSYNC_ROOT"])
+            if not root.is_dir():
+                return False, f"WIP & Reference folder is unavailable: {root}"
+            paths["DOCSYNC_ROOT"] = str(root)
             self.running = True
             self.mode = mode
             self.started_at = time.time()
             self.finished_at = None
             self.exit_code = None
             self.logs.clear()
-            commands = self.commands_for(mode, sync_project)
-        threading.Thread(target=self._run, args=(commands,), daemon=True).start()
+            commands = self.commands_for(mode, sync_project, root)
+        threading.Thread(target=self._run, args=(commands, paths), daemon=True).start()
         return True, "Run started."
 
-    def commands_for(self, mode: str, sync_project: bool) -> list[list[str]]:
-        wip_base = [sys.executable, str(self.wip_script), "--year-root", str(self.year_root)]
+    def commands_for(self, mode: str, sync_project: bool, root: Path) -> list[list[str]]:
+        wip_base = [sys.executable, str(self.wip_script), "--year-root", str(root)]
         wip_commands = [
             [*wip_base, "scan"],
-            [*wip_base, "dashboard", "--output", str(self.dashboard_path)],
+            [*wip_base, "dashboard", "--output", str(root / ".wip" / "dashboard.html")],
         ]
         if mode == "wip_scan":
             return wip_commands
@@ -131,7 +146,7 @@ class RunState:
             organizer.append("--no-sync")
         return [organizer, *wip_commands]
 
-    def _run(self, commands: list[list[str]]) -> None:
+    def _run(self, commands: list[list[str]], paths: dict[str, str]) -> None:
         exit_code = 1
         try:
             for args in commands:
@@ -140,6 +155,7 @@ class RunState:
                 process = subprocess.Popen(
                     args,
                     cwd=self.script.parent,
+                    env={**os.environ, **paths},
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -263,11 +279,14 @@ class AppHandler(BaseHTTPRequestHandler):
             body = page(APP_STATE.csrf_token).encode("utf-8")
             self.send_document(HTTPStatus.OK, add_app_tabs(body, self.path))
             return
-        if self.path in ("/workflows", "/day"):
-            filename = "docsync-workflows.html" if self.path == "/workflows" else "docsync-day.html"
+        if self.path in TAB_TEMPLATES:
+            filename = TAB_TEMPLATES[self.path]
             template = (APP_ROOT / filename).read_text(encoding="utf-8")
             body = template.replace("__DOCSYNC_TOKEN__", json.dumps(APP_STATE.csrf_token)).encode("utf-8")
             self.send_document(HTTPStatus.OK, add_app_tabs(body, self.path))
+            return
+        if self.path == "/api/settings":
+            self.settings_reply()
             return
         if self.path in APP_ASSETS:
             filename, content_type = APP_ASSETS[self.path]
@@ -298,7 +317,10 @@ class AppHandler(BaseHTTPRequestHandler):
         if self.path == "/history":
             try:
                 template = (APP_ROOT / "docsync-history.html").read_text(encoding="utf-8")
-                body = render_today(APP_STATE.year_root, template).encode("utf-8")
+                options = "".join(f'<option value="{escape(command)}"></option>' for command in HISTORY_COMMANDS)
+                template = (template.replace("__DOCSYNC_TOKEN__", escape(APP_STATE.csrf_token))
+                            .replace("__COMMAND_OPTIONS__", options))
+                body = render_today(APP_STATE.year_root, template, key=APP_STATE.file_key).encode("utf-8")
             except OSError:
                 self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Không đọc được nhật ký phân loại trên máy."})
                 return
@@ -316,7 +338,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if not self.local_request():
             return
         action = DAY_ACTIONS.get(self.path)
-        if action is None and self.path not in ("/api/run", "/api/workflows", "/api/workflows/credential"):
+        if action is None and self.path not in ("/api/run", "/api/settings", "/api/workflows",
+                                               "/api/workflows/credential", "/api/history/classify"):
             self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
             return
         if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), APP_STATE.csrf_token):
@@ -324,7 +347,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 2 <= length <= (16384 if action else 2048):
+            limit = 32768 if self.path == "/api/settings" else 16384 if action or self.path == "/api/history/classify" else 2048
+            if not 2 <= length <= limit:
                 raise ValueError
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
@@ -332,11 +356,25 @@ class AppHandler(BaseHTTPRequestHandler):
             if action:
                 self.day_reply(action, payload)
                 return
+            if self.path == "/api/history/classify":
+                self.history_reply(payload)
+                return
+            if self.path == "/api/settings":
+                self.settings_reply(payload)
+                return
             if self.path != "/api/run":
                 self.workflow_reply(payload)
                 return
-            mode = payload.get("mode")
-            sync_project = payload.get("syncProject", False)
+            if "command" in payload:
+                command = payload["command"]
+                mode = HISTORY_COMMANDS.get(" ".join(command.casefold().split())) if isinstance(command, str) else None
+                if mode is None:
+                    self.send_json(HTTPStatus.BAD_REQUEST, {"message": "Chọn một lệnh trong danh sách gợi ý."})
+                    return
+                sync_project = False
+            else:
+                mode = payload.get("mode")
+                sync_project = payload.get("syncProject", False)
             if not isinstance(mode, str) or not isinstance(sync_project, bool):
                 raise ValueError
         except (ValueError, json.JSONDecodeError):
@@ -344,6 +382,41 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         started, message = APP_STATE.start(mode, sync_project)
         self.send_json(HTTPStatus.ACCEPTED if started else HTTPStatus.CONFLICT, {"message": message, **APP_STATE.snapshot()})
+
+    def history_reply(self, payload: dict[str, Any]) -> None:
+        try:
+            with APP_STATE.lock:
+                if APP_STATE.running:
+                    raise BlockingIOError
+                result = decide_history_file(APP_STATE.year_root, state_directory(), APP_STATE.file_key, payload)
+            with APP_STATE.health_lock:
+                APP_STATE.health_cached_at = 0
+            self.send_json(HTTPStatus.OK, result)
+        except BlockingIOError:
+            self.send_json(HTTPStatus.CONFLICT, {"message": "DocSync đang xử lý file khác. Thử lại sau khi lượt hiện tại hoàn tất."})
+        except FileExistsError:
+            self.send_json(HTTPStatus.CONFLICT, {"message": "Đích đã có file cùng tên. File nguồn vẫn ở chỗ cũ."})
+        except ValueError as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            print(f"History classification failed: {error}", file=sys.stderr, flush=True)
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Chưa xác nhận được kết quả. Làm mới lịch sử trước khi thử lại."})
+
+    def settings_reply(self, payload: dict[str, Any] | None = None) -> None:
+        try:
+            if payload is not None:
+                with APP_STATE.lock:
+                    if APP_STATE.running:
+                        self.send_json(HTTPStatus.CONFLICT, {"message": "Đợi lượt phân loại hiện tại hoàn tất rồi lưu lại."})
+                        return
+                    save_workspace_paths(payload.get("paths"))
+                with APP_STATE.health_lock:
+                    APP_STATE.health_cached_at = 0
+            self.send_json(HTTPStatus.OK, settings_payload())
+        except ValueError as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+        except OSError:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Không đọc hoặc lưu được cấu hình thư mục DocSync."})
 
     def day_reply(self, action: str, payload: dict[str, Any]) -> None:
         try:

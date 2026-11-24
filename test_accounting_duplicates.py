@@ -2,6 +2,7 @@
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,8 @@ class AccountingDuplicateTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
+        for dependency in ('docsync_layout.py', 'docsync_paths.py'):
+            shutil.copy2(ROOT / dependency, self.home / dependency)
         self.year = self.home / 'Documents/WIP & Reference'
         self.year.mkdir(parents=True)
         self.archive = self.home / 'archive'

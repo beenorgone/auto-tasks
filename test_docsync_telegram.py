@@ -76,6 +76,48 @@ class TelegramBridgeTests(unittest.TestCase):
         self.run_sync()
         self.assertEqual(old, self.calls[-1]['id'])
 
+    def test_delete_request_trashes_exact_file_and_notifies_once(self):
+        self.run_sync()
+        self.status = 'delete_requested'
+        self.run_sync(); self.run_sync()
+        record = json.loads((self.state/'purchase-telegram-state.json').read_text())[str(self.source)]
+        self.assertEqual('deleted', record['status'])
+        self.assertFalse(self.source.exists())
+        self.assertEqual(b'zip bytes', Path(record['trash']).read_bytes())
+        self.assertEqual(1, sum(c['op'] == 'complete' for c in self.calls))
+
+    def test_delete_request_rejects_changed_bytes(self):
+        self.run_sync()
+        self.source.write_bytes(b'changed')
+        self.status = 'delete_requested'; self.run_sync()
+        self.assertEqual(b'changed', self.source.read_bytes())
+        self.assertFalse((self.state/'telegram-trash').exists())
+        self.assertTrue(any(c['op'] == 'delete_failed' for c in self.calls))
+
+    def test_trash_rejects_directory_symlink_and_collision(self):
+        for kind in ('directory', 'symlink', 'collision'):
+            with self.subTest(kind=kind):
+                source = self.base/kind
+                record = dict(id=kind, sha256=purchase.sha256(self.source), status='pending')
+                if kind == 'directory': source.mkdir()
+                elif kind == 'symlink': source.symlink_to(self.source)
+                else:
+                    source.write_bytes(b'zip bytes')
+                    target = self.state/'telegram-trash'/kind/source.name
+                    target.parent.mkdir(parents=True); target.write_bytes(b'existing')
+                bridge.trash_file(source, record, self.state, self.state/'test.json', {str(source):record})
+                self.assertEqual('blocked', record['status'])
+                self.assertTrue(source.exists())
+                if kind == 'collision': self.assertEqual(b'existing', target.read_bytes())
+
+    def test_trash_recovers_rename_before_index_save(self):
+        record = dict(id='recover', sha256=purchase.sha256(self.source), status='pending')
+        target = self.state/'telegram-trash'/record['id']/self.source.name
+        target.parent.mkdir(parents=True); self.source.rename(target)
+        bridge.trash_file(self.source, record, self.state, self.state/'test.json', {str(self.source):record})
+        self.assertEqual('deleted', record['status'])
+        self.assertEqual(str(target), record['trash'])
+
     def test_destination_collision_does_not_send_group_question(self):
         history = self.root/'2026/trong nuoc/03/ho so PO2 - 2026-03-01 - NCC Unknown.zip'
         history.parent.mkdir(parents=True); history.write_bytes(b'history')

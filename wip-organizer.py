@@ -40,11 +40,11 @@ WIP_DIRECTORIES = DIRECTORIES
 VALID_STATUSES = ("captured", "auto_classified", "needs_review", "in_progress", "waiting_external", "approved", "filed", "archived")
 
 DEFAULT_RULES = {
-    "version": 9,
+    "version": 10,
     "excluded_paths": [
         "03/Adults/**", "03/Kids/**", "03/Tram Nam Co Don/**",
         "2026/2026-03/Adults/**", "2026/2026-03/Kids/**", "2026/2026-03/Tram Nam Co Don/**", "tieng goi noi hoang da - Jack London/**",
-        ".wip/**", "00_INBOX/.*/**",
+        ".wip/**", ".docsync/**", "00_INBOX/.*/**",
     ],
     "generated_name_patterns": [r"^pdftohtml", r"^pdftotext", r"^text\.txt$", r"^agents\.md$"],
     "categories": [
@@ -52,7 +52,7 @@ DEFAULT_RULES = {
          "patterns": [r"iv-(?:mtt|company)-batch"],
          "target": "AT. VAT", "route_mode": "managed_move"},
         {"id": "shopee_reports", "label": "Shopee reports", "confidence": 0.96,
-         "patterns": [r"(?:^|/)at\. ?shopee reports(?:/|$)", r"order\.", r"(?:^|/)orders_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$"],
+         "patterns": [r"(?:^|/)at\. ?shopee reports(?:/|$)", r"(?:^|/)order\.", r"(?:^|/)orders_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.xlsx$"],
          "target": "AT. Shopee reports", "route_mode": "managed_move"},
         {"id": "ghtk_reports", "label": "GHTK reports", "confidence": 0.97,
          "patterns": [r"(?:^|/)at\. ?ghtk reports(?:/|$)", r"ghtk_", r"bien_ban_doi_soat"],
@@ -86,6 +86,25 @@ DEFAULT_RULES = {
 
 for _category in DEFAULT_RULES["categories"]:
     _category["target"] = CATEGORY_TARGETS[_category["id"]]
+
+DEFAULT_RULES['categories'].extend([
+    {'id': 'production', 'label': 'Sản xuất', 'confidence': 0.96,
+     'patterns': [r'l[eệ]nh s[aả]n xu[aấ]t', r'k[eế] ho[aạ]ch s[aả]n xu[aấ]t', r'production (?:order|plan)'],
+     'target': CATEGORY_TARGETS['production']},
+    {'id': 'purchasing', 'label': 'Mua hàng - dịch vụ', 'confidence': 0.96,
+     'patterns': [r'(?:^|/)at\. ?sourcing contracts(?:/|$)', r'tokhaihq', r't[oờ] khai h[aả]i quan', r'purchase order'],
+     'target': CATEGORY_TARGETS['purchasing']},
+])
+# Known defaults only: migrate these patterns without broadening custom rules.
+TOPIC_PATTERNS = {
+    'shopee_reports': [r'shopee.*(?:v[aậ]n đ[oơ]n|shipping|giao h[aà]ng|logistics)'],
+    'finance_ops': [r'b[aả]ng n[oộ]p thu[eế]', r'(?:đ[eề]|de) ngh[iị] thanh to[aá]n', r'\bdebit note\b'],
+    'quality_regulatory': [r'^specs?\b', r'\btechnical specification\b', r'^tcb[-_ ]'],
+}
+for _category in DEFAULT_RULES['categories']:
+    _category['patterns'].extend(TOPIC_PATTERNS.get(_category['id'], []))
+    if _category['id'] == 'sourcing_logistics':
+        _category['patterns'].remove(r'(?:^|/)at\. ?sourcing contracts(?:/|$)')
 
 
 MANAGED_TARGETS = {
@@ -153,6 +172,24 @@ def migrate_rules(rules: dict) -> tuple[dict, bool]:
             changed = True
     if migrated.get("version", 0) < 9:
         migrated["version"] = 9
+        changed = True
+    if migrated.get('version', 0) < 10:
+        for default in DEFAULT_RULES['categories']:
+            if default['id'] not in known_ids and default['id'] in ('production', 'purchasing'):
+                categories.append(copy.deepcopy(default))
+            else:
+                for category in categories:
+                    if category.get('id') == default['id']:
+                        if default['id'] == 'shopee_reports':
+                            category['patterns'] = [r'(?:^|/)order\.' if p == r'order\.' else p for p in category.get('patterns', [])]
+                        for pattern in TOPIC_PATTERNS.get(default['id'], []):
+                            if pattern not in category.get('patterns', []):
+                                category.setdefault('patterns', []).append(pattern)
+                        if default['id'] == 'sourcing_logistics':
+                            category['patterns'] = [p for p in category.get('patterns', []) if p != r'(?:^|/)at\. ?sourcing contracts(?:/|$)']
+        if '.docsync/**' not in migrated.get('excluded_paths', []):
+            migrated.setdefault('excluded_paths', []).append('.docsync/**')
+        migrated['version'] = 10
         changed = True
     return migrated, changed
 
@@ -405,6 +442,7 @@ def scan(year_root: Path, source_names: list[str], root_files: bool) -> dict[str
     counters: Counter[str] = Counter()
     with open_db(database) as conn:
         mark_scopes_inactive(conn, year_root, sources, root_files)
+        conn.execute("UPDATE documents SET active=0 WHERE path LIKE '.docsync/%'")
         if not source_names:
             for indexed in conn.execute("SELECT path FROM documents WHERE active=1").fetchall():
                 if not (year_root / indexed["path"]).is_file():
@@ -524,6 +562,27 @@ def dashboard(year_root: Path, output: Path | None = None) -> Path:
                  FROM dossiers d JOIN documents doc ON doc.dossier_id = d.dossier_id
                  WHERE doc.active = 1 GROUP BY d.dossier_id ORDER BY d.updated_at DESC"""
         ).fetchall()
+    rows = [dict(row) for row in rows]
+    if year_root.resolve() == work_root().resolve():
+        from docsync_topics import REVIEW_FILE, cached_fingerprint
+        runtime = Path(os.environ.get('STATE_DIR', str(TOOL_ROOT / 'ivar-documents-organizer')))
+        index = runtime / REVIEW_FILE
+        decisions = json.loads(index.read_text()) if index.exists() else {}
+        for relative, decision in decisions.items():
+            source = year_root / relative
+            if decision.get('status') not in ('pending', 'held') or not source.exists():
+                continue
+            try:
+                if cached_fingerprint(source, decision) != decision['sha256']:
+                    continue
+            except ValueError:
+                continue
+            for row in rows:
+                if any(within(path, relative) for path in (row['paths'] or '').split('||')):
+                    row['status'] = 'waiting_external' if decision['status'] == 'pending' else 'needs_review'
+                    row['reasons'] = 'Đã gửi Telegram; chờ chọn chủ đề' if decision['status'] == 'pending' else 'Đã chọn giữ lại qua Telegram'
+                    row['next_action'] = 'Trả lời /ds trong bot Telegram để chọn chủ đề hoặc giữ lại.' if decision['status'] == 'pending' else 'Giữ nguyên theo quyết định của bạn.'
+
     by_status: dict[str, list[sqlite3.Row]] = {status: [] for status in VALID_STATUSES}
     for row in rows:
         by_status.setdefault(row["status"], []).append(row)
@@ -540,14 +599,14 @@ def dashboard(year_root: Path, output: Path | None = None) -> Path:
             category_label = html.escape(labels_by_category.get(row["category"], row["category"]))
             confidence = f"{float(row['confidence']) * 100:.0f}% confidence"
             reasons = html.escape(row["reasons"] or "No evidence recorded")
-            action = html.escape(next_action(status))
+            action = html.escape(row.get('next_action') or next_action(status))
             cards.append(f"<article class='card'><h3>{html.escape(row['dossier_id'])}</h3><p class='category'>{category_label} · {row['document_count']} files · {confidence}</p><p class='target'>{target}</p><p class='action'><strong>Next:</strong> {action}</p><p class='evidence'><strong>Evidence:</strong> {reasons}</p><p class='paths'>{preview}</p>{extra}</article>")
         board.append(f"<section class='column'><header><h2>{labels[status]}</h2><span>{len(by_status[status])}</span></header>{''.join(cards) or '<p class=empty>No dossier</p>'}</section>")
     total = sum(row["document_count"] for row in rows)
     output.write_text(f"""<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>WIP &amp; Reference · Kanban</title><style>
 *{{box-sizing:border-box}}body{{margin:0;background:#f6f7fb;color:#1c1b20;font:14px/1.45 Arial,sans-serif}}main{{padding:24px;max-width:2200px;margin:auto}}h1{{margin:0;font-size:28px}}.subtitle{{color:#5f6368}}.board{{display:grid;grid-template-columns:repeat(7,minmax(265px,1fr));gap:16px;overflow-x:auto;padding:8px 0 20px}}.column{{background:#eef0f7;border-radius:16px;padding:12px;min-height:280px}}.column header{{display:flex;align-items:center;justify-content:space-between;margin:2px 4px 12px}}.column h2{{font-size:15px;margin:0}}.column header span{{background:#d9e2ff;color:#17386d;border-radius:999px;padding:2px 9px;font-weight:bold}}.card{{background:#fff;border-radius:12px;padding:13px;margin:10px 0;box-shadow:0 1px 3px #0002;border-left:4px solid #4f73c7}}.card h3{{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}}.category{{color:#4a5568;margin:0 0 8px;text-transform:capitalize}}.target{{background:#eef4ff;color:#174ea6;margin:0 -2px 9px;padding:5px 7px;border-radius:6px;overflow-wrap:anywhere}}.action{{background:#f4f7f8;margin:0 -2px 8px;padding:6px 7px;border-radius:6px}}.evidence{{color:#4a5568;font-size:12px;margin:0 0 8px;overflow-wrap:anywhere}}.paths{{color:#5f6368;font-size:12px;margin:0;overflow-wrap:anywhere}}.more,.empty{{color:#697386;font-style:italic}}@media(max-width:700px){{main{{padding:16px}}.board{{grid-template-columns:repeat(7,84vw)}}}}</style>
-<main><h1>WIP &amp; Reference · Kanban</h1><p class='subtitle'>{len(rows)} dossiers · {total} active documents · Index only: no file has been moved or deleted.</p><div class='board'>{''.join(board)}</div></main>""", encoding="utf-8")
+<main><h1>WIP &amp; Reference · Kanban</h1><p class='subtitle'>{len(rows)} dossiers · {total} active documents · Work topics organize files; columns show the next workflow step. Uncertain decisions go to Telegram.</p><div class='board'>{''.join(board)}</div></main>""", encoding="utf-8")
     return output
 
 

@@ -1,7 +1,7 @@
 """Send explicitly selected files to the IVAR connected-app intake APIs."""
 
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import getpass
 import hashlib
 from http.client import HTTPException
@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import stat
 import sys
-from tempfile import SpooledTemporaryFile
+from tempfile import TemporaryFile
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -124,7 +124,8 @@ def multipart(filename, stream, size, fields):
 @contextmanager
 def selected_file(path, limit, send, open_source=None):
     # Nonblocking open also handles a FIFO selected accidentally on the local filesystem.
-    with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as snapshot:
+    # Python 3.10's SpooledTemporaryFile lacks seekable(), which ZipFile requires.
+    with (TemporaryFile() if send else nullcontext()) as snapshot:
         source = open_source(path) if open_source else os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), 'rb')
         with source as stream:
             info = os.fstat(stream.fileno())
@@ -139,12 +140,13 @@ def selected_file(path, limit, send, open_source=None):
                 if size > info.st_size:
                     break
                 digest.update(chunk)
-                if send:
+                if snapshot is not None:
                     snapshot.write(chunk)
             final = os.fstat(stream.fileno())
             if size != info.st_size or (final.st_mtime_ns, final.st_ctime_ns) != (info.st_mtime_ns, info.st_ctime_ns):
                 raise IntakeError('File đang thay đổi. Chọn lại sau khi file được lưu xong.')
-        snapshot.seek(0)
+        if snapshot is not None:
+            snapshot.seek(0)
         yield snapshot, size, digest.hexdigest()
 
 

@@ -84,7 +84,7 @@ form button{justify-self:start;margin-top:4px}
 const token = __DOCSYNC_TOKEN__;
 const byId = id => document.getElementById(id);
 const stages = ['enabled', 'disabled', 'proposed'];
-const stateLabels = {running:'Đang gửi', retry:'Chờ thử lại', review:'Cần kiểm tra', done:'EIM đã nhận', paused:'Đã tạm dừng'};
+const stateLabels = {checking:'Đang kiểm tra', running:'Đang gửi', retry:'Chờ thử lại', review:'Cần kiểm tra', done:'EIM đã nhận', paused:'Đã tạm dừng'};
 let pending = false;
 let lastData = '';
 

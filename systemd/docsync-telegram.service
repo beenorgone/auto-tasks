@@ -5,5 +5,5 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 %h/Documents/.auto-tasks/docsync_telegram.py
-TimeoutStartSec=120
+TimeoutStartSec=240
 UMask=0077

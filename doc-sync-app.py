@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs
 from docsync_core import WIP, board, health
 import docsync_file_actions as file_actions
-from docsync_layout import TOPICS
+from docsync_layout import TOPICS, system_file_routes
 from docsync_paths import save_workspace_paths, settings_payload, state_directory, work_root, workspace_paths
 import docsync_daily as daily
 import docsync_workflows as workflows
@@ -548,7 +548,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     save_workspace_paths(payload.get("paths"))
                 with APP_STATE.health_lock:
                     APP_STATE.health_cached_at = 0
-            self.send_json(HTTPStatus.OK, settings_payload())
+            settings = settings_payload()
+            self.send_json(HTTPStatus.OK, {**settings, "system_routes": system_file_routes(settings["paths"])})
         except ValueError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
         except OSError:

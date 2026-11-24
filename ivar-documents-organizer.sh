@@ -29,7 +29,8 @@ CURRENT_DAY=$(printf '%s' "$CURRENT_DATE" | cut -d- -f3)
 # Keep the legacy variable name for the shared intake/routing helpers. The work
 # root is stable across years; only monthly archives are partitioned by year.
 WORK_ROOT="$DOCSYNC_ROOT"
-eval "$(python3 "${SCRIPT_DIR}/docsync_layout.py" --shell)"
+layout_config=$(python3 "${SCRIPT_DIR}/docsync_layout.py" --shell) || exit 1
+eval "$layout_config"
 INVOICE_INTAKE="${WORK_ROOT}/${INVOICE_INTAKE_REL}"
 CURRENT_YEAR_ROOT="$WORK_ROOT"
 CURRENT_MONTH_ROOT="${WORK_ROOT}/${CURRENT_YEAR}/${CURRENT_YEAR}-${CURRENT_MONTH}"
@@ -1439,7 +1440,7 @@ move_to_duplicate() {
   source_path=$1
   sha=$2
   note=$3
-  dup_dir="${CURRENT_YEAR_ROOT}/duplicates"
+  dup_dir="${CURRENT_YEAR_ROOT}/${DUPLICATES_REL}"
   if [ -L "$dup_dir" ]; then
     error "Refusing symlink duplicate folder: $dup_dir"
     return 1
@@ -1827,11 +1828,11 @@ invoice_dest_dir_for_metadata() {
   fi
 
   if [ -n "$invoice_year" ] && [ -n "$invoice_month" ] && [ -n "$vendor_folder" ]; then
-    printf '%s\n' "${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}/${vendor_folder}"
+    printf '%s\n' "${IVAR_DATA}/${INVOICE_ARCHIVE_REL}/${invoice_year}/${invoice_month}/${vendor_folder}"
   elif [ -n "$invoice_year" ] && [ -n "$invoice_month" ]; then
-    printf '%s\n' "${IVAR_DATA}/hoa don dau vao/${invoice_year}/${invoice_month}"
+    printf '%s\n' "${IVAR_DATA}/${INVOICE_ARCHIVE_REL}/${invoice_year}/${invoice_month}"
   else
-    printf '%s\n' "${IVAR_DATA}/hoa don dau vao"
+    printf '%s\n' "${IVAR_DATA}/${INVOICE_ARCHIVE_REL}"
   fi
 }
 
@@ -1938,7 +1939,7 @@ process_unc_pdf() {
   if [ -z "$invoice_month" ]; then
     invoice_month=$CURRENT_MONTH
   fi
-  move_dir="${IVAR_DATA}/ngan hang/UNC/${invoice_year}/${invoice_month}"
+  move_dir="${IVAR_DATA}/${UNC_ARCHIVE_REL}/${invoice_year}/${invoice_month}"
   ensure_dir "$move_dir"
   dest_name=$(build_unc_filename "$text_file" "$source_path")
   target="${move_dir}/${dest_name}"
@@ -1958,7 +1959,7 @@ process_unc_pdf() {
 
   final_dest_name=$(basename "$target")
   if [ "$is_meta" = "1" ]; then
-    copy_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+    copy_dir="${IVAR_DATA}/${META_ARCHIVE_REL}/${invoice_year}/${META_UNC_REL}"
     ensure_dir "$copy_dir"
     run_cmd cp "$source_path" "${copy_dir}/${final_dest_name}"
     note="facebook-unc"
@@ -2212,7 +2213,7 @@ process_source_file() {
     period_day=$(printf '%s' "$period" | cut -d. -f1)
     valid_period=$(date -d "${period_year}-${period_month}-${period_day}" '+%Y-%m-%d' 2>/dev/null || true)
     if [ -n "$valid_period" ] && [ "$valid_period" = "${period_year}-${period_month}-${period_day}" ]; then
-      dest_dir="${IVAR_DATA}/ngan hang/sao ke/${period_year}"
+      dest_dir="${IVAR_DATA}/${BANK_ARCHIVE_REL}/${period_year}"
       dest_path="${dest_dir}/${base_name}"
       if [ "$PLAN_MANAGED_RULES" -eq 1 ]; then
         info "PLAN bank-statement: $source_path -> $dest_path [period=$period]"
@@ -2584,7 +2585,7 @@ rescan_classified_file() {
     fi
 
     if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
-      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/ngan hang/UNC")
+      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/${UNC_ARCHIVE_REL}")
       inferred_year=$(printf '%s' "$inferred" | cut -f1)
       inferred_month=$(printf '%s' "$inferred" | cut -f2)
       if [ -z "$invoice_year" ]; then
@@ -2601,7 +2602,7 @@ rescan_classified_file() {
       invoice_month=$CURRENT_MONTH
     fi
 
-    dest_dir="${IVAR_DATA}/ngan hang/UNC/${invoice_year}/${invoice_month}"
+    dest_dir="${IVAR_DATA}/${UNC_ARCHIVE_REL}/${invoice_year}/${invoice_month}"
     dest_name=$(build_unc_filename "$text_file" "$source_path")
     target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
     move_rescanned_file "$source_path" "$target" "UNC"
@@ -2615,7 +2616,7 @@ rescan_classified_file() {
     fi
 
     if [ -z "$invoice_year" ] || [ -z "$invoice_month" ]; then
-      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/hoa don dau vao")
+      inferred=$(infer_year_month_from_path "$source_path" "${IVAR_DATA}/${INVOICE_ARCHIVE_REL}")
       inferred_year=$(printf '%s' "$inferred" | cut -f1)
       inferred_month=$(printf '%s' "$inferred" | cut -f2)
       if [ -z "$invoice_year" ]; then
@@ -2667,7 +2668,7 @@ rescan_facebook_file() {
   invoice_year=$(printf '%s' "$parsed" | cut -f2)
   vendor_tax=$(printf '%s' "$parsed" | cut -f6)
   invoice_no=$(printf '%s' "$parsed" | cut -f7)
-  inferred_year=$(infer_year_from_path "$source_path" "${IVAR_DATA}/chi phi Facebook")
+  inferred_year=$(infer_year_from_path "$source_path" "${IVAR_DATA}/${META_ARCHIVE_REL}")
 
   if [ -z "$invoice_year" ]; then
     invoice_year=$inferred_year
@@ -2678,13 +2679,13 @@ rescan_facebook_file() {
 
   case "$facebook_kind" in
     unc)
-      dest_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/UNC"
+      dest_dir="${IVAR_DATA}/${META_ARCHIVE_REL}/${invoice_year}/${META_UNC_REL}"
       dest_name=$(build_unc_filename "$text_file" "$source_path")
       target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
       move_rescanned_file "$source_path" "$target" "Facebook UNC"
       ;;
     invoice)
-      dest_dir="${IVAR_DATA}/chi phi Facebook/${invoice_year}/hoa don"
+      dest_dir="${IVAR_DATA}/${META_ARCHIVE_REL}/${invoice_year}/${META_INVOICE_REL}"
       dest_name=$(build_invoice_filename "$vendor_tax" "$invoice_no" "$source_path")
       target=$(unique_target_for_move "$source_path" "${dest_dir}/${dest_name}" "$sha")
       move_rescanned_file "$source_path" "$target" "Facebook invoice"
@@ -2696,9 +2697,9 @@ rescan_classified_dirs() {
   tmp_root=$(tmp_dir_make)
   trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
 
-  invoice_root="${IVAR_DATA}/hoa don dau vao"
-  unc_root="${IVAR_DATA}/ngan hang/UNC"
-  facebook_root="${IVAR_DATA}/chi phi Facebook"
+  invoice_root="${IVAR_DATA}/${INVOICE_ARCHIVE_REL}"
+  unc_root="${IVAR_DATA}/${UNC_ARCHIVE_REL}"
+  facebook_root="${IVAR_DATA}/${META_ARCHIVE_REL}"
 
   if [ -d "$invoice_root" ]; then
     info "Rescanning classified invoices: $invoice_root"
@@ -2750,7 +2751,7 @@ rescan_unc_dir() {
   tmp_root=$(tmp_dir_make)
   trap 'cleanup_dir "$tmp_root"' EXIT INT TERM
 
-  unc_root="${IVAR_DATA}/ngan hang/UNC"
+  unc_root="${IVAR_DATA}/${UNC_ARCHIVE_REL}"
   if [ -d "$unc_root" ]; then
     info "Rescanning classified UNC files only: $unc_root"
     find "$unc_root" -type f ! -name '.*' | while IFS= read -r source_path; do
@@ -2760,7 +2761,7 @@ rescan_unc_dir() {
     warn "UNC destination folder not found: $unc_root"
   fi
 
-  fb_root="${IVAR_DATA}/chi phi Facebook"
+  fb_root="${IVAR_DATA}/${META_ARCHIVE_REL}"
   if [ -d "$fb_root" ]; then
     info "Rescanning Facebook UNC files..."
     find "$fb_root" -type f ! -name '.*' | while IFS= read -r source_path; do
@@ -2886,7 +2887,7 @@ main() {
   fi
 
   if [ "$RESCAN_UNC_MODE" -ne 1 ]; then
-    set -- --root "$IVAR_DATA/ho so mua vao" --state "$STATE_DIR" \
+    set -- --root "${IVAR_DATA}/${PURCHASE_ARCHIVE_REL}" --state "$STATE_DIR" \
       --intake "$WORK_ROOT" --intake "$WORK_ROOT/00_INBOX" --intake "$INVOICE_INTAKE"
     [ -z "$DOCS_ROOT" ] || set -- "$@" --intake "$DOCS_ROOT"
     [ -z "$DOWNLOADS_ROOT" ] || set -- "$@" --intake "$DOWNLOADS_ROOT"

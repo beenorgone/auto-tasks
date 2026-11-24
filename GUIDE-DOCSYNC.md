@@ -345,6 +345,11 @@ Hai ô quét bổ sung có thể để trống. App, CLI và watcher dùng giá 
 từ lượt tiếp theo. Mỗi gốc WIP có chỉ mục và công tắc workflow riêng.
 Biến môi trường đặt sẵn cho dịch vụ hoặc terminal được ưu tiên và hiện chỉ đọc trên web.
 
+Trong **Cài đặt → Quy tắc phân loại và chuyển file → Quy tắc hệ thống**, xem điều kiện,
+thao tác và đích hiện tại của hóa đơn PDF/XML, UNC, sao kê Saokenhanh, chi phí Meta,
+PO/MO, hồ sơ mua vào và xử lý bản trùng. Các đường dẫn cập nhật khi lưu gốc WIP hoặc
+gốc kế toán. Mục **Khi yêu cầu quét lại kho** cho biết các đích của `--rescan` và `--rescan-unc`.
+
 Trong **Cài đặt → Quy tắc phân loại và chuyển file → Biểu mẫu**, mở quy tắc để
 chỉnh đích, từ khóa, cách xử lý hoặc bật/tắt. Dùng **Lên / Xuống** để đổi thứ tự,
 rồi bấm **Lưu quy tắc**. Chế độ **JSON** và CLI dùng cùng cấu hình `.wip/rules.json`.

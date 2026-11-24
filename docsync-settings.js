@@ -4,6 +4,8 @@ const form = document.querySelector('#folder-settings');
 const controls = form.querySelector('fieldset');
 const feedback = document.querySelector('#feedback');
 const fields = [...form.querySelectorAll('input')];
+const systemRules = document.querySelector('#system-rules-list');
+const systemRulesStatus = document.querySelector('#system-rules-status');
 
 function message(text, error = false) {
     feedback.textContent = text;
@@ -15,7 +17,41 @@ function showPaths(settings) {
         field.value = settings.paths[field.name];
         field.readOnly = settings.overridden.includes(field.name);
     }
+    showSystemRules(settings.system_routes);
     return settings.overridden.length ? ' Các ô chỉ đọc lấy đường dẫn từ môi trường chạy.' : '';
+}
+
+function showSystemRules(groups) {
+    const node = (tag, text, className) => {
+        const item = document.createElement(tag);
+        item.textContent = text;
+        if (className) item.className = className;
+        return item;
+    };
+    const opened = new Set([...systemRules.querySelectorAll('details[open]')].map(group => group.dataset.group));
+    const initialLoad = !systemRules.childElementCount;
+    systemRules.replaceChildren(...groups.map((group, index) => {
+        const details = node('details', '', 'system-group');
+        details.dataset.group = group.title;
+        details.open = opened.has(group.title) || (initialLoad && index === 0);
+        const title = node('summary', group.title + ' ');
+        title.append(node('small', `· ${group.operations.length} quy tắc`));
+        const rows = node('ul', '', 'system-operations');
+        for (const operation of group.operations) {
+            const row = node('li', '', 'system-operation');
+            const heading = node('div', '');
+            heading.append(node('strong', operation.name), node('small', operation.action));
+            const body = node('div', '');
+            body.append(node('p', operation.condition));
+            for (const destination of operation.destinations) body.append(node('code', destination));
+            row.append(heading, body);
+            rows.append(row);
+        }
+        details.append(title, rows);
+        return details;
+    }));
+    systemRulesStatus.textContent = '';
+    systemRulesStatus.hidden = true;
 }
 
 async function loadPaths() {
@@ -28,6 +64,7 @@ async function loadPaths() {
         controls.disabled = false;
     } catch {
         message('Không đọc được cấu hình. Tải lại trang để thử lại.', true);
+        systemRulesStatus.textContent = 'Không đọc được quy tắc hệ thống. Tải lại trang để thử lại.';
     }
 }
 

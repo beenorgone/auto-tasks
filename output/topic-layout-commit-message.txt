@@ -1,0 +1,8 @@
+feat(docsync): organize work by topic and route uncertain decisions to Telegram
+
+- Replace workflow buckets with seven shared work-topic destinations
+- Preserve file integrity, manual reviews, and indexed paths during audited migration
+- Batch owner-bound Telegram decisions for ambiguous files and complete folders
+- Disable extension-based month rollover and correct Shopee order matching
+- Keep year archives intact and refresh Kanban after approved filing
+- Cover topic routing, rollback, ownership, stale approvals, and year boundaries

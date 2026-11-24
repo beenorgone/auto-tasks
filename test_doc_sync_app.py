@@ -171,7 +171,9 @@ if "dashboard" in sys.argv:
                         connection.request("GET", "/settings")
                         response = connection.getresponse()
                         self.assertEqual(200, response.status)
-                        self.assertIn(b'id="folder-settings"', response.read())
+                        markup = response.read()
+                        self.assertIn(b'id="folder-settings"', markup)
+                        self.assertIn(b'id="system-rules"', markup)
                         paths = {"DOCSYNC_ROOT": str(new_root), "IVAR_DATA": str(accounting),
                                  "DOCSYNC_DOCUMENTS_SCAN": "", "DOCSYNC_DOWNLOADS_SCAN": ""}
                         body = json.dumps({"paths": paths})
@@ -183,7 +185,17 @@ if "dashboard" in sys.argv:
                         connection.request("POST", "/api/settings", body, {"X-CSRF-Token": state.csrf_token})
                         response = connection.getresponse()
                         self.assertEqual(200, response.status)
-                        self.assertEqual(paths, json.load(response)["paths"])
+                        settings = json.load(response)
+                        self.assertEqual(paths, settings["paths"])
+                        operations = {item["name"]: item for group in settings["system_routes"]
+                                      for item in group["operations"]}
+                        self.assertIn(str(accounting / "ngan hang/UNC/<năm>/<tháng>"),
+                                      operations["Ủy nhiệm chi (UNC)"]["destinations"])
+                        self.assertIn(str(accounting / "hoa don dau vao"),
+                                      operations["Hóa đơn đầu vào PDF/XML"]["destinations"])
+                        self.assertEqual([str(new_root / "Mua hàng - dịch vụ/PO")],
+                                         operations["Tài liệu PO rời"]["destinations"])
+                        self.assertEqual([str(new_root / "duplicates")], operations["UNC trùng"]["destinations"])
                         connection.request("GET", "/api/status")
                         self.assertEqual(str(new_root), json.load(connection.getresponse())["yearRoot"])
                     finally:

@@ -7,6 +7,16 @@ TOPICS = {
     'ke_toan': 'Kế toán - tài chính', 'phap_ly': 'Pháp Lý',
 }
 INVOICE_INTAKE = 'Kế toán - tài chính/Hóa đơn'
+INVOICE_ARCHIVE = 'hoa don dau vao'
+UNC_ARCHIVE = 'ngan hang/UNC'
+BANK_ARCHIVE = 'ngan hang/sao ke'
+META_ARCHIVE = 'chi phi Facebook'
+META_UNC = 'UNC'
+META_INVOICE = 'hoa don'
+PURCHASE_ARCHIVE = 'ho so mua vao'
+PO_REPORT = 'Mua hàng - dịch vụ/PO'
+MO_REPORT = 'Sản xuất/Lệnh sản xuất'
+DUPLICATES = 'duplicates'
 AUDIT_DIRECTORY = '.docsync/Nhật ký'
 TECH_DIRECTORY = '.docsync/Cách ly kỹ thuật'
 GHTK_WORKFLOW_FOLDER = 'Giao vận/GHTK'
@@ -38,7 +48,7 @@ LAYOUT_MOVES = {
     '20_BAO_CAO/Shopee': REPORT_TARGETS['shopee_reports'],
     '20_BAO_CAO/GHTK': REPORT_TARGETS['ghtk_reports'],
     '20_BAO_CAO/Sao ke': REPORT_TARGETS['bank_statements'],
-    '20_BAO_CAO/Nhap hang': 'Mua hàng - dịch vụ/PO',
+    '20_BAO_CAO/Nhap hang': PO_REPORT,
     '80_THAM_CHIEU/Bieu mau/Sao ke': 'Kế toán - tài chính/Biểu mẫu/Sao kê',
     '80_THAM_CHIEU/Quy chuan': 'QC/Quy chuẩn',
     '90_CACH_LY_KY_THUAT': TECH_DIRECTORY,
@@ -135,8 +145,74 @@ def safe_directory(root, relative):
     return target
 
 
+def system_file_routes(paths):
+    """Describe the built-in file operations using the organizer's effective paths."""
+    accounting = Path(paths['IVAR_DATA'])
+    work = Path(paths['DOCSYNC_ROOT'])
+    accounting_period = '<năm>/<tháng>'
+    intake_sources = [paths[key] for key in ('DOCSYNC_DOCUMENTS_SCAN', 'DOCSYNC_DOWNLOADS_SCAN') if paths[key]]
+
+    def operation(name, condition, *destinations, action='Chuyển file'):
+        return {'name': name, 'condition': condition, 'action': action,
+                'destinations': [str(destination) for destination in destinations]}
+
+    return [
+        {'title': 'Kế toán và ngân hàng', 'operations': [
+            operation('Hóa đơn đầu vào PDF/XML',
+                      'Nhận diện thông tin hóa đơn từ PDF hoặc XML. PDF có thể mang theo XML cùng tên. Thiếu kỳ thì đưa vào gốc kho hóa đơn.',
+                      accounting / INVOICE_ARCHIVE / accounting_period / '<nhà cung cấp và MST>',
+                      accounting / INVOICE_ARCHIVE),
+            operation('Ủy nhiệm chi (UNC)',
+                      'Nhận diện UNC theo tên hoặc nội dung. Dùng kỳ đọc được từ chứng từ, hoặc kỳ hiện tại nếu thiếu.',
+                      accounting / UNC_ARCHIVE / accounting_period),
+            operation('Bản sao UNC cho chi phí Meta',
+                      'Khi xử lý UNC nhận diện là chi phí Meta/Facebook, lưu thêm một bản ở kho chi phí.',
+                      accounting / META_ARCHIVE / '<năm>' / META_UNC, action='Sao chép thêm'),
+            operation('Sao kê Saokenhanh',
+                      'Tên file dạng saokenhanh-DD.MM.YYYY-DD.MM.YYYY-… và ngày bắt đầu hợp lệ. Đích cùng tên được giữ nguyên.',
+                      accounting / BANK_ARCHIVE / '<năm>'),
+        ]},
+        {'title': 'Tiếp nhận và hồ sơ', 'operations': [
+            operation('Hồ sơ mua vào ZIP',
+                      'ZIP mang mã PO, ngày hợp lệ và nhóm nhà cung cấp xác định được từ lịch sử hoặc quyết định đã duyệt.',
+                      accounting / PURCHASE_ARCHIVE / '<năm>/<nhap khau hoặc trong nuoc>/<tháng>'),
+            operation('Tài liệu PO rời', 'Tên chứa mã PO. Nếu đích có file cùng tên, giữ nguồn để kiểm tra.',
+                      work / PO_REPORT),
+            operation('Tài liệu MO rời', 'Tên chứa mã MO. Nếu trùng tên đích, dùng tên có mã SHA-256.',
+                      work / MO_REPORT),
+            operation('File từ thư mục quét bổ sung',
+                      ('File còn lại sau các bước nhận diện trong ' + ' · '.join(intake_sources) + '.')
+                      if intake_sources else 'Chưa đặt thư mục quét bổ sung trong Cài đặt thư mục.',
+                      work),
+        ]},
+        {'title': 'Bản trùng và dọn file', 'operations': [
+            operation('Hóa đơn PDF/XML trùng',
+                      'Bản lưu hiện có khớp dung lượng và SHA-256. Đổi tên bản nhận vào với hậu tố _duplicate.',
+                      '<cùng thư mục nguồn>', action='Đổi tên'),
+            operation('UNC trùng', 'Bản lưu hiện có khớp dung lượng và SHA-256. Giữ bản trùng để xem lại.',
+                      work / DUPLICATES),
+            operation('File .log ở gốc WIP', 'Organizer dọn file .log nằm trực tiếp ở thư mục WIP.',
+                      action='Xóa file'),
+        ]},
+        {'title': 'Khi yêu cầu quét lại kho', 'operations': [
+            operation('Quét lại PDF hóa đơn và UNC',
+                      'Chạy với --rescan cho kho hóa đơn và UNC, hoặc --rescan-unc cho UNC. Tính lại tên và kỳ từ chứng từ.',
+                      accounting / INVOICE_ARCHIVE / accounting_period,
+                      accounting / UNC_ARCHIVE / accounting_period, action='Đổi tên hoặc chuyển lại'),
+            operation('Quét lại PDF chi phí Meta',
+                      'Chạy với --rescan cho hóa đơn và UNC chi phí Meta, hoặc --rescan-unc cho UNC chi phí Meta.',
+                      accounting / META_ARCHIVE / '<năm>' / META_INVOICE,
+                      accounting / META_ARCHIVE / '<năm>' / META_UNC, action='Đổi tên hoặc chuyển lại'),
+        ]},
+    ]
+
+
 if __name__ == '__main__':
     import shlex
-    for key, value in {'INVOICE_INTAKE_REL': INVOICE_INTAKE, 'PO_REPORT_REL': 'Mua hàng - dịch vụ/PO',
-                       'MO_REPORT_REL': 'Sản xuất/Lệnh sản xuất'}.items():
+    for key, value in {
+        'INVOICE_INTAKE_REL': INVOICE_INTAKE, 'INVOICE_ARCHIVE_REL': INVOICE_ARCHIVE,
+        'UNC_ARCHIVE_REL': UNC_ARCHIVE, 'BANK_ARCHIVE_REL': BANK_ARCHIVE, 'META_ARCHIVE_REL': META_ARCHIVE,
+        'META_UNC_REL': META_UNC, 'META_INVOICE_REL': META_INVOICE, 'PURCHASE_ARCHIVE_REL': PURCHASE_ARCHIVE,
+        'PO_REPORT_REL': PO_REPORT, 'MO_REPORT_REL': MO_REPORT, 'DUPLICATES_REL': DUPLICATES,
+    }.items():
         print(key + '=' + shlex.quote(value))

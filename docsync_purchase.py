@@ -10,7 +10,7 @@ import time
 import unicodedata
 from pathlib import Path
 from docsync_paths import OPTIONAL_SCAN_PATHS, state_directory, workspace_paths
-from docsync_layout import INVOICE_INTAKE
+from docsync_layout import INVOICE_INTAKE, PURCHASE_ARCHIVE
 
 RULE = 'purchase_months'
 RULE_DESCRIPTION = 'Hồ sơ mua vào: ngày YYYY-MM-DD trên tên → <năm>/<nhóm nếu có>/<MM>; giữ nguyên bộ hồ sơ'
@@ -107,7 +107,7 @@ def sha256(path):
 
 def purchase_root(home=None, *, paths=None):
     paths = paths if paths is not None else workspace_paths(home)
-    return Path(paths['IVAR_DATA']) / 'ho so mua vao'
+    return Path(paths['IVAR_DATA']) / PURCHASE_ARCHIVE
 
 
 def safe(path):

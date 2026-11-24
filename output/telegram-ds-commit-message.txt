@@ -1,0 +1,9 @@
+feat(docsync): streamline Telegram classification with /ds
+
+- Add collision-safe six-character proposal references and short category codes
+- Accept up to ten independent decisions per message and preserve legacy commands
+- Shorten pending, acknowledgement, and completion messages
+- Replace silent burst suppression with a bounded per-minute request limit
+- Keep notice metadata separate from decisions and serialize competing approvals
+- Refresh existing pending proposals in the compact format once
+- Advertise /ds in the bot command menu

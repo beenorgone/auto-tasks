@@ -22,7 +22,12 @@ button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #675
 .rule-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px 14px;margin:10px 0}
 .rule-card select{width:100%;border:1px solid #81748b;border-radius:8px;padding:8px;font:inherit;background:#fff;color:inherit}
 .rule-keyword{display:flex;flex-wrap:wrap;align-items:end;gap:8px}.rule-keyword label{flex:1 1 200px}
+.system-rules{margin-top:18px}.system-group{margin:8px 0;border:1px solid #e7dfea;border-radius:12px;background:#f6effa}
+.system-group summary{padding:10px 14px;cursor:pointer;font-weight:700}.system-group small{display:inline;font-weight:400}
+.system-operations{list-style:none;margin:0;padding:0 14px}.system-operation{display:grid;grid-template-columns:minmax(155px,.65fr) minmax(0,1.35fr);gap:8px 16px;border-top:1px solid #e7dfea;padding:10px 0}
+.system-operation p{margin:0;color:#5f5966}.system-operation small,.system-operation code{display:block}.system-operation code{overflow-wrap:anywhere;margin-top:4px;color:#392460}
 @media(max-width:560px){main{padding:22px 13px}form{padding:14px}}
+@media(max-width:560px){.system-operation{grid-template-columns:1fr;gap:3px}}
 </style></head><body><main>
 <h1>Cài đặt thư mục</h1>
 <form id="folder-settings" data-token=__DOCSYNC_TOKEN__>
@@ -42,6 +47,13 @@ button:disabled{opacity:.55;cursor:default}:focus-visible{outline:2px solid #675
 </form>
 <section class="rules" aria-labelledby="rules-title">
   <h2 id="rules-title">Quy tắc phân loại và chuyển file</h2>
+  <section id="system-rules" class="system-rules" aria-labelledby="system-rules-title">
+    <h3 id="system-rules-title">Quy tắc hệ thống</h3>
+    <p>Điều kiện bên dưới lấy từ các bước xử lý của DocSync. Đích cập nhật theo thư mục WIP và đích kế toán đã lưu.</p>
+    <p id="system-rules-status" role="status">Đang đọc quy tắc hệ thống…</p>
+    <div id="system-rules-list"></div>
+  </section>
+  <h3>Quy tắc WIP có thể chỉnh</h3>
   <form id="rule-settings">
     <fieldset disabled>
       <div class="rule-toolbar" role="group" aria-label="Cách chỉnh quy tắc">

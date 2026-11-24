@@ -1,0 +1,8 @@
+feat(wordquest): create reviewed vocabulary practice from DocSync photos
+
+- Add an owner-approved wq action for vocabulary images in Telegram
+- Extract visible words through the existing ERP vision gateway and budget guard
+- Send bounded private lesson links and retain original photo bytes
+- Review and edit OCR output before saving a reusable practice basket
+- Preserve existing meanings, points and progress with idempotent imports
+- Process photos outside the organizer lock and validate approvals by content hash

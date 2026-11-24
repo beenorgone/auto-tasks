@@ -196,3 +196,19 @@ the plan. Plan mode does not modify source files or metadata.
 Review the audit in `99_NHAT_KY`, check `./docsync board`, then restore the services
 that were active before migration. Do not run the legacy broad organizer Apply
 as a substitute for this folder-only migration.
+
+### Telegram intake in the DocSync app
+
+Open **Telegram** in the shared DocSync navigation (`http://127.0.0.1:8787/telegram`).
+The Kanban board shows pending, processing, saved and held files from the existing
+local `telegram-file-review.service`. Approve, hold and revoke approval directly
+in this tab; listing files does not approve or download them. The existing inbox
+timer downloads approved files on its next run. Use **File trong ngày** to review
+and classify downloaded files.
+
+This tab requires the separately installed and configured `telegram-file-inbox`
+application and its review service on `127.0.0.1:8766`. If unavailable, the tab
+shows a connection message; if setup has not completed, it shows setup guidance.
+The bridge reads the existing review token locally and never includes that
+credential in browser responses. All decisions use DocSync's local-origin and
+CSRF checks as well as the inbox service's existing state validation.

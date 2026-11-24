@@ -15,7 +15,7 @@ trap 'rm -rf -- "$stage"' EXIT
 bundle="$stage/DocSync-Ubuntu"
 mkdir -p "$bundle/app" "$bundle/systemd" "$bundle/wheels"
 
-for file in docsync docsync.py doc-sync-app.py docsync-app.css docsync-day.html docsync-day.js \
+for file in docsync_telegram_inbox.py docsync-telegram-inbox.html docsync-telegram-inbox.js docsync-telegram-inbox.css docsync docsync.py doc-sync-app.py docsync-app.css docsync-day.html docsync-day.js \
     docsync-history.html docsync-history.js docsync-workflows.html docsync-settings.html docsync-settings.js \
     docsync-file-actions.html docsync-file-actions.js docsync_file_actions.py \
     docsync_carrier.py docsync_core.py docsync_daily.py docsync_history.py docsync_intake.py docsync_layout.py \

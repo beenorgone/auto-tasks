@@ -1,0 +1,18 @@
+feat(docsync): integrate Telegram file approval into the shared app
+
+Add a Telegram tab with a Material-style Kanban board for pending,
+processing, saved, and held files. Reuse the existing local inbox service
+for approval, hold, and approval revocation; preserve explicit approval
+before download and link users to daily file classification.
+
+Keep the review credential server-side, use bounded loopback requests
+without redirects or environment proxies, and protect decisions with
+DocSync's origin and CSRF checks. Show actionable connection, setup,
+and stale-state errors, and refresh visible boards every ten seconds.
+
+Include the new assets in Ubuntu source packaging and document the
+separate Telegram inbox service dependency.
+
+Validation: 10 focused Python tests passed; JavaScript and shell syntax
+checks passed; verified the live board with existing inbox data on desktop
+and mobile. No real-file approval was performed during verification.

@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs
 from docsync_core import WIP, board, health
 import docsync_file_actions as file_actions
+import docsync_telegram_inbox as telegram_inbox
 from docsync_layout import TOPICS, system_file_routes
 from docsync_paths import save_workspace_paths, settings_payload, state_directory, work_root, workspace_paths
 import docsync_daily as daily
@@ -40,13 +41,15 @@ DEFAULT_PORT = 8787
 MAX_LOG_LINES = 400
 DAY_ACTIONS = {f"/api/day/{action}": action for action in ("credential", "types", "targets", "record", "attach")}
 TABS = (("/", "Tổng quan"), ("/day", "File trong ngày"), ("/history", "Lịch sử hôm nay"),
-        ("/workflows", "Workflows"), ("/settings", "Cài đặt"))
-APP_ASSETS = {"/assets/app.css": ("docsync-app.css", "text/css"),
+        ("/telegram", "Telegram"), ("/workflows", "Workflows"), ("/settings", "Cài đặt"))
+APP_ASSETS = {"/assets/telegram.js": ("docsync-telegram-inbox.js", "text/javascript"),
+              "/assets/telegram.css": ("docsync-telegram-inbox.css", "text/css"),
+              "/assets/app.css": ("docsync-app.css", "text/css"),
               "/assets/day.js": ("docsync-day.js", "text/javascript"),
               "/assets/history.js": ("docsync-history.js", "text/javascript"),
               "/assets/settings.js": ("docsync-settings.js", "text/javascript"),
               "/assets/file-actions.js": ("docsync-file-actions.js", "text/javascript")}
-TAB_TEMPLATES = {"/workflows": "docsync-workflows.html", "/day": "docsync-day.html", "/settings": "docsync-settings.html"}
+TAB_TEMPLATES = {"/telegram": "docsync-telegram-inbox.html", "/workflows": "docsync-workflows.html", "/day": "docsync-day.html", "/settings": "docsync-settings.html"}
 HISTORY_COMMANDS = {"xem trước": "preview", "phân loại": "apply",
                     "docsync preview": "preview", "docsync apply": "apply"}
 
@@ -191,7 +194,7 @@ APP_STATE = RunState()
 
 def add_app_tabs(document: bytes, current: str, language: str = "vi") -> bytes:
     links = []
-    english = ("Overview", "Daily files", "Today's history", "Workflows", "Settings")
+    english = ("Overview", "Daily files", "Today's history", "Telegram", "Workflows", "Settings")
     for (url, label), translated in zip(TABS, english):
         active = ' aria-current="page"' if url == current else ''
         href = '/?lang=en' if url == '/' and language == 'en' else url
@@ -367,6 +370,9 @@ class AppHandler(BaseHTTPRequestHandler):
             body = template.replace("__DOCSYNC_TOKEN__", json.dumps(APP_STATE.csrf_token)).encode("utf-8")
             self.send_document(HTTPStatus.OK, add_app_tabs(body, self.path))
             return
+        if self.path == "/api/telegram/items":
+            self.telegram_reply()
+            return
         if self.path == "/api/settings":
             self.settings_reply()
             return
@@ -422,7 +428,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if not self.local_request():
             return
         action = DAY_ACTIONS.get(self.path)
-        if action is None and self.path not in ("/api/run", "/api/settings", "/api/settings/rules", "/api/workflows",
+        if action is None and self.path not in ("/api/telegram/decision", "/api/run", "/api/settings", "/api/settings/rules", "/api/workflows",
                                                "/api/workflows/credential", "/api/history/classify", "/api/files/actions"):
             self.send_json(HTTPStatus.NOT_FOUND, {"message": "Not found."})
             return
@@ -439,6 +445,9 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise ValueError
+            if self.path == "/api/telegram/decision":
+                self.telegram_reply(payload)
+                return
             if action:
                 self.day_reply(action, payload)
                 return
@@ -474,6 +483,16 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         started, message = APP_STATE.start(mode, sync_project)
         self.send_json(HTTPStatus.ACCEPTED if started else HTTPStatus.CONFLICT, {"message": message, **APP_STATE.snapshot()})
+
+    def telegram_reply(self, payload=None) -> None:
+        try:
+            self.send_json(HTTPStatus.OK, telegram_inbox.request(payload))
+        except ValueError:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"message": "Chọn file và thao tác hợp lệ."})
+        except telegram_inbox.DecisionConflict:
+            self.send_json(HTTPStatus.CONFLICT, {"message": "Trạng thái file đã đổi. Cập nhật danh sách rồi thử lại."})
+        except telegram_inbox.InboxUnavailable:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Chưa kết nối được dịch vụ nhận file Telegram. Kiểm tra ứng dụng Duyệt file Telegram rồi bấm Cập nhật."})
 
     def file_actions_reply(self, payload: dict[str, Any]) -> None:
         try:
